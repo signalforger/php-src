@@ -2669,8 +2669,10 @@ static void zend_emit_return_type_check(
 		}
 
 		if (expr && expr->op_type == IS_CONST && ZEND_TYPE_CONTAINS_CODE(type, Z_TYPE(expr->u.constant))) {
-			/* we don't need run-time check */
-			return;
+			/* we don't need run-time check, unless we have array element type info to validate */
+			if (!ZEND_TYPE_HAS_ARRAY_ELEMENT(type)) {
+				return;
+			}
 		}
 
 		opline = zend_emit_op(NULL, ZEND_VERIFY_RETURN_TYPE, expr, NULL);
@@ -7028,6 +7030,29 @@ static void zend_compile_declare(zend_ast *ast) /* {{{ */
 				CG(active_op_array)->fn_flags |= ZEND_ACC_STRICT_TYPES;
 			}
 
+		} else if (zend_string_equals_literal_ci(name, "strict_arrays")) {
+			zval value_zv;
+
+			if (FAILURE == zend_is_first_statement(ast, /* allow_nop */ true)) {
+				zend_error_noreturn(E_COMPILE_ERROR, "strict_arrays declaration must be "
+					"the very first statement in the script");
+			}
+
+			if (ast->child[1] != NULL) {
+				zend_error_noreturn(E_COMPILE_ERROR, "strict_arrays declaration must not "
+					"use block mode");
+			}
+
+			zend_const_expr_to_zval(&value_zv, value_ast_ptr, /* allow_dynamic */ false);
+
+			if (Z_TYPE(value_zv) != IS_LONG || (Z_LVAL(value_zv) != 0 && Z_LVAL(value_zv) != 1)) {
+				zend_error_noreturn(E_COMPILE_ERROR, "strict_arrays declaration must have 0 or 1 as its value");
+			}
+
+			if (Z_LVAL(value_zv) == 1) {
+				CG(active_op_array)->fn_flags |= ZEND_ACC_STRICT_ARRAYS;
+			}
+
 		} else {
 			zend_error(E_COMPILE_WARNING, "Unsupported declare '%s'", ZSTR_VAL(name));
 		}
@@ -7086,6 +7111,35 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 		}
 
 		return (zend_type) ZEND_TYPE_INIT_CODE(ast->attr, 0, 0);
+	} else if (ast->kind == ZEND_AST_TYPE_ARRAY_OF) {
+		/* array<T> syntax - store element type info */
+		zend_ast *element_type_ast = ast->child[0];
+		zend_typed_array_element *elem_type = zend_arena_alloc(&CG(arena), sizeof(zend_typed_array_element));
+		elem_type->class_name = NULL;
+		elem_type->type_code = 0;
+
+		if (element_type_ast->kind == ZEND_AST_TYPE) {
+			/* Built-in type like int, string, float, bool */
+			elem_type->type_code = element_type_ast->attr;
+		} else {
+			/* Class name or built-in type name */
+			zend_string *class_name = zend_ast_get_str(element_type_ast);
+			/* Check for built-in type names first */
+			uint8_t type_code = zend_lookup_builtin_type_by_name(class_name);
+			if (type_code != 0) {
+				elem_type->type_code = type_code;
+			} else {
+				elem_type->type_code = IS_OBJECT;
+				elem_type->class_name = zend_string_copy(class_name);
+			}
+		}
+
+		zend_type type;
+		type.type_mask = (1u << IS_ARRAY);
+		type.ptr = elem_type;
+		return type;
+	} else if (ast->kind == ZEND_AST_TYPE_ARRAY_SHAPE) {
+		return (zend_type) ZEND_TYPE_INIT_CODE(IS_ARRAY, 0, 0);
 	} else {
 		zend_string *type_name = zend_ast_get_str(ast);
 		uint8_t type_code = zend_lookup_builtin_type_by_name(type_name);
@@ -8460,6 +8514,7 @@ static zend_op_array *zend_compile_func_decl_ex(
 	}
 
 	op_array->fn_flags |= (orig_op_array->fn_flags & ZEND_ACC_STRICT_TYPES);
+	op_array->fn_flags |= (orig_op_array->fn_flags & ZEND_ACC_STRICT_ARRAYS);
 	op_array->fn_flags |= decl->flags;
 	op_array->line_start = decl->start_lineno;
 	op_array->line_end = decl->end_lineno;
