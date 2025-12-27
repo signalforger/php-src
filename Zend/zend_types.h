@@ -414,7 +414,7 @@ struct _zend_array {
 		struct {
 			ZEND_ENDIAN_LOHI_4(
 				uint8_t    flags,
-				uint8_t    _unused,
+				uint8_t    nValidatedElemType,  /* Cached validated element type for array<T> */
 				uint8_t    nIteratorsCount,
 				uint8_t    _unused2)
 		} v;

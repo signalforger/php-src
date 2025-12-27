@@ -2617,6 +2617,31 @@ static void zend_compile_memoized_expr(znode *result, zend_ast *expr) /* {{{ */
 }
 /* }}} */
 
+/* Check if a constant array's elements all match the expected type (compile-time) */
+static bool zend_const_array_elements_match_type(zval *arr, uint8_t expected_type_code)
+{
+	zval *val;
+	ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(arr), val) {
+		switch (expected_type_code) {
+			case IS_LONG:
+				if (Z_TYPE_P(val) != IS_LONG) return false;
+				break;
+			case IS_DOUBLE:
+				if (Z_TYPE_P(val) != IS_DOUBLE && Z_TYPE_P(val) != IS_LONG) return false;
+				break;
+			case IS_STRING:
+				if (Z_TYPE_P(val) != IS_STRING) return false;
+				break;
+			case _IS_BOOL:
+				if (Z_TYPE_P(val) != IS_TRUE && Z_TYPE_P(val) != IS_FALSE) return false;
+				break;
+			default:
+				return false; /* Can't verify object types at compile time */
+		}
+	} ZEND_HASH_FOREACH_END();
+	return true;
+}
+
 static void zend_emit_return_type_check(
 		znode *expr, zend_arg_info *return_info, bool implicit) /* {{{ */
 {
@@ -2672,6 +2697,16 @@ static void zend_emit_return_type_check(
 			/* we don't need run-time check, unless we have array element type info to validate */
 			if (!ZEND_TYPE_HAS_ARRAY_ELEMENT(type)) {
 				return;
+			}
+			/* Escape analysis: if constant array elements all match the type, skip runtime check */
+			if (Z_TYPE(expr->u.constant) == IS_ARRAY) {
+				const zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(type);
+				if (elem_type && elem_type->type_code != IS_OBJECT) {
+					/* Can verify primitive types at compile time */
+					if (zend_const_array_elements_match_type(&expr->u.constant, elem_type->type_code)) {
+						return; /* All elements match - no runtime check needed */
+					}
+				}
 			}
 		}
 

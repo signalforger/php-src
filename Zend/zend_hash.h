@@ -46,6 +46,7 @@ typedef enum {
 #define HASH_FLAG_STATIC_KEYS      (1<<4) /* long and interned strings */
 #define HASH_FLAG_HAS_EMPTY_IND    (1<<5)
 #define HASH_FLAG_ALLOW_COW_VIOLATION (1<<6)
+#define HASH_FLAG_ELEM_TYPE_VALID  (1<<7) /* Element type validation cache is valid */
 
 /* Only the low byte are real flags */
 #define HASH_FLAG_MASK 0xff
@@ -84,6 +85,16 @@ typedef enum {
 	HT_SET_ITERATORS_COUNT(ht, HT_ITERATORS_COUNT(ht) + 1)
 #define HT_DEC_ITERATORS_COUNT(ht) \
 	HT_SET_ITERATORS_COUNT(ht, HT_ITERATORS_COUNT(ht) - 1)
+
+/* Element type validation cache for array<T> optimization */
+#define HT_VALIDATED_ELEM_TYPE(ht) (ht)->u.v.nValidatedElemType
+#define HT_ELEM_TYPE_IS_VALID(ht) ((HT_FLAGS(ht) & HASH_FLAG_ELEM_TYPE_VALID) != 0)
+#define HT_INVALIDATE_ELEM_TYPE(ht) \
+	do { HT_FLAGS(ht) &= ~HASH_FLAG_ELEM_TYPE_VALID; } while (0)
+#define HT_SET_VALIDATED_ELEM_TYPE(ht, type) do { \
+		(ht)->u.v.nValidatedElemType = (type); \
+		HT_FLAGS(ht) |= HASH_FLAG_ELEM_TYPE_VALID; \
+	} while (0)
 
 extern ZEND_API const HashTable zend_empty_array;
 

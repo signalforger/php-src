@@ -829,6 +829,7 @@ static zend_always_inline zval *_zend_hash_add_or_update_i(HashTable *ht, zend_s
 
 	IS_CONSISTENT(ht);
 	HT_ASSERT_RC1(ht);
+	HT_INVALIDATE_ELEM_TYPE(ht);
 	zend_string_hash_val(key);
 
 	if (UNEXPECTED(HT_FLAGS(ht) & (HASH_FLAG_UNINITIALIZED|HASH_FLAG_PACKED))) {
@@ -910,6 +911,7 @@ static zend_always_inline zval *_zend_hash_str_add_or_update_i(HashTable *ht, co
 
 	IS_CONSISTENT(ht);
 	HT_ASSERT_RC1(ht);
+	HT_INVALIDATE_ELEM_TYPE(ht);
 
 	if (UNEXPECTED(HT_FLAGS(ht) & (HASH_FLAG_UNINITIALIZED|HASH_FLAG_PACKED))) {
 		if (EXPECTED(HT_FLAGS(ht) & HASH_FLAG_UNINITIALIZED)) {
@@ -1095,6 +1097,7 @@ static zend_always_inline zval *_zend_hash_index_add_or_update_i(HashTable *ht, 
 
 	IS_CONSISTENT(ht);
 	HT_ASSERT_RC1(ht);
+	HT_INVALIDATE_ELEM_TYPE(ht);
 
 	if ((flag & HASH_ADD_NEXT) && h == ZEND_LONG_MIN) {
 		h = 0;
@@ -1451,6 +1454,7 @@ static zend_always_inline void zend_hash_iterators_clamp_max(const HashTable *ht
 
 static zend_always_inline void _zend_hash_packed_del_val(HashTable *ht, uint32_t idx, zval *zv)
 {
+	HT_INVALIDATE_ELEM_TYPE(ht);
 	idx = HT_HASH_TO_IDX(idx);
 	ht->nNumOfElements--;
 	if (ht->nNumUsed - 1 == idx) {
@@ -1472,6 +1476,7 @@ static zend_always_inline void _zend_hash_packed_del_val(HashTable *ht, uint32_t
 
 static zend_always_inline void _zend_hash_del_el_ex(HashTable *ht, uint32_t idx, Bucket *p, Bucket *prev)
 {
+	HT_INVALIDATE_ELEM_TYPE(ht);
 	if (prev) {
 		Z_NEXT(prev->val) = Z_NEXT(p->val);
 	} else {
@@ -1876,6 +1881,7 @@ ZEND_API void ZEND_FASTCALL zend_hash_clean(HashTable *ht)
 {
 	IS_CONSISTENT(ht);
 	HT_ASSERT_RC1(ht);
+	HT_INVALIDATE_ELEM_TYPE(ht);
 
 	if (ht->nNumUsed) {
 		if (HT_IS_PACKED(ht)) {
