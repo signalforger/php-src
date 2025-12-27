@@ -191,6 +191,9 @@ typedef struct {
 #define ZEND_TYPE_USES_ARENA(t) \
 	((((t).type_mask) & _ZEND_TYPE_ARENA_BIT) != 0)
 
+#define ZEND_TYPE_HAS_ARRAY_ELEMENT(t) \
+	((((t).type_mask) & (1u << IS_ARRAY)) != 0 && (t).ptr != NULL && !ZEND_TYPE_IS_COMPLEX(t))
+
 #define ZEND_TYPE_IS_ONLY_MASK(t) \
 	(ZEND_TYPE_IS_SET(t) && (t).ptr == NULL)
 
