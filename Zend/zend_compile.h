@@ -107,6 +107,15 @@ typedef struct _zend_declarables {
 	zend_long ticks;
 } zend_declarables;
 
+/* Array element type info for array<T> syntax */
+typedef struct _zend_typed_array_element {
+	uint8_t type_code;       /* IS_LONG, IS_STRING, etc. or IS_OBJECT for class */
+	zend_string *class_name; /* Class name for object types, NULL otherwise */
+} zend_typed_array_element;
+
+#define ZEND_TYPED_ARRAY_ELEMENT(t) \
+	((zend_typed_array_element *) (t).ptr)
+
 /* Compilation context that is different for each file, but shared between op arrays. */
 typedef struct _zend_file_context {
 	zend_declarables declarables;
@@ -407,6 +416,9 @@ typedef struct _zend_oparray_context {
 /*                                                        |     |     |     */
 /* op_array uses strict mode types                        |     |     |     */
 #define ZEND_ACC_STRICT_TYPES            (1U << 31) /*    |  X  |     |     */
+/*                                                        |     |     |     */
+/* op_array uses strict array element types               |     |     |     */
+#define ZEND_ACC_STRICT_ARRAYS           (1U << 30) /*    |  X  |     |     */
 
 #define ZEND_ACC_PPP_MASK  (ZEND_ACC_PUBLIC | ZEND_ACC_PROTECTED | ZEND_ACC_PRIVATE)
 #define ZEND_ACC_PPP_SET_MASK  (ZEND_ACC_PUBLIC_SET | ZEND_ACC_PROTECTED_SET | ZEND_ACC_PRIVATE_SET)
@@ -718,6 +730,15 @@ ZEND_STATIC_ASSERT(ZEND_MM_ALIGNED_SIZE(sizeof(zval)) == sizeof(zval),
 
 #define EX_USES_STRICT_TYPES() \
 	ZEND_CALL_USES_STRICT_TYPES(execute_data)
+
+#define ZEND_CALL_USES_STRICT_ARRAYS(call) \
+	(((call)->func->common.fn_flags & ZEND_ACC_STRICT_ARRAYS) != 0)
+
+#define EX_USES_STRICT_ARRAYS() \
+	ZEND_CALL_USES_STRICT_ARRAYS(execute_data)
+
+#define ZEND_RET_USES_STRICT_ARRAYS() \
+	ZEND_CALL_USES_STRICT_ARRAYS(EG(current_execute_data))
 
 #define ZEND_ARG_USES_STRICT_TYPES() \
 	(EG(current_execute_data)->prev_execute_data && \
