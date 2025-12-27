@@ -1448,10 +1448,91 @@ ZEND_API ZEND_COLD void zend_verify_array_element_type_error(
 		fclass, fsep, fname, expected_type, index, actual_type);
 }
 
-ZEND_API bool zend_verify_array_element_types(
-	const zend_function *zf, zval *arr, const zend_typed_array_element *elem_type)
+/*
+ * Optimized type-specialized validation functions
+ * Key optimizations:
+ * 1. Type check selected once outside loop (no switch per element)
+ * 2. Minimal work in hot path (no index tracking, no type name assignment)
+ * 3. ZEND_HASH_FOREACH_VAL instead of KEY_VAL when keys not needed
+ * 4. Class entry cached for object types
+ */
+static zend_always_inline bool zend_verify_array_elements_long(HashTable *ht)
 {
-	HashTable *ht = Z_ARRVAL_P(arr);
+	zval *val;
+	ZEND_HASH_FOREACH_VAL(ht, val) {
+		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
+			val = Z_REFVAL_P(val);
+		}
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_LONG)) {
+			return false;
+		}
+	} ZEND_HASH_FOREACH_END();
+	return true;
+}
+
+static zend_always_inline bool zend_verify_array_elements_double(HashTable *ht)
+{
+	zval *val;
+	ZEND_HASH_FOREACH_VAL(ht, val) {
+		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
+			val = Z_REFVAL_P(val);
+		}
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_DOUBLE && Z_TYPE_P(val) != IS_LONG)) {
+			return false;
+		}
+	} ZEND_HASH_FOREACH_END();
+	return true;
+}
+
+static zend_always_inline bool zend_verify_array_elements_string(HashTable *ht)
+{
+	zval *val;
+	ZEND_HASH_FOREACH_VAL(ht, val) {
+		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
+			val = Z_REFVAL_P(val);
+		}
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_STRING)) {
+			return false;
+		}
+	} ZEND_HASH_FOREACH_END();
+	return true;
+}
+
+static zend_always_inline bool zend_verify_array_elements_bool(HashTable *ht)
+{
+	zval *val;
+	ZEND_HASH_FOREACH_VAL(ht, val) {
+		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
+			val = Z_REFVAL_P(val);
+		}
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_TRUE && Z_TYPE_P(val) != IS_FALSE)) {
+			return false;
+		}
+	} ZEND_HASH_FOREACH_END();
+	return true;
+}
+
+static zend_always_inline bool zend_verify_array_elements_object(HashTable *ht, zend_class_entry *ce)
+{
+	zval *val;
+	ZEND_HASH_FOREACH_VAL(ht, val) {
+		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
+			val = Z_REFVAL_P(val);
+		}
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_OBJECT)) {
+			return false;
+		}
+		if (ce && UNEXPECTED(!instanceof_function(Z_OBJCE_P(val), ce))) {
+			return false;
+		}
+	} ZEND_HASH_FOREACH_END();
+	return true;
+}
+
+/* Cold path: find the failing element for error reporting */
+static ZEND_COLD zend_long zend_find_invalid_array_element(
+	HashTable *ht, uint8_t type_code, zend_class_entry *cached_ce, zval **out_val)
+{
 	zval *val;
 	zend_ulong idx;
 	zend_string *key;
@@ -1460,59 +1541,101 @@ ZEND_API bool zend_verify_array_element_types(
 	ZEND_HASH_FOREACH_KEY_VAL(ht, idx, key, val) {
 		zend_long current_idx = key ? numeric_idx : (zend_long)idx;
 		bool type_matches = false;
-		const char *expected_type_name = "unknown";
-		const char *actual_type_name;
 
 		ZVAL_DEREF(val);
 
-		switch (elem_type->type_code) {
+		switch (type_code) {
 			case IS_LONG:
 				type_matches = (Z_TYPE_P(val) == IS_LONG);
-				expected_type_name = "int";
 				break;
 			case IS_DOUBLE:
 				type_matches = (Z_TYPE_P(val) == IS_DOUBLE || Z_TYPE_P(val) == IS_LONG);
-				expected_type_name = "float";
 				break;
 			case IS_STRING:
 				type_matches = (Z_TYPE_P(val) == IS_STRING);
-				expected_type_name = "string";
 				break;
 			case _IS_BOOL:
 				type_matches = (Z_TYPE_P(val) == IS_TRUE || Z_TYPE_P(val) == IS_FALSE);
-				expected_type_name = "bool";
 				break;
 			case IS_OBJECT:
-				/* Set expected type name first, before checking value type */
-				if (elem_type->class_name) {
-					expected_type_name = ZSTR_VAL(elem_type->class_name);
-				} else {
-					expected_type_name = "object";
-				}
-				/* Now check if value matches */
 				if (Z_TYPE_P(val) == IS_OBJECT) {
-					if (elem_type->class_name) {
-						zend_class_entry *ce = zend_lookup_class(elem_type->class_name);
-						type_matches = ce && instanceof_function(Z_OBJCE_P(val), ce);
-					} else {
-						type_matches = true;
-					}
+					type_matches = !cached_ce || instanceof_function(Z_OBJCE_P(val), cached_ce);
 				}
 				break;
 			default:
-				type_matches = true; /* Unknown type, don't validate */
+				type_matches = true;
 				break;
 		}
 
 		if (!type_matches) {
-			actual_type_name = zend_zval_type_name(val);
-			zend_verify_array_element_type_error(zf, current_idx, val, expected_type_name, actual_type_name);
-			return false;
+			*out_val = val;
+			return current_idx;
 		}
 		numeric_idx++;
 	} ZEND_HASH_FOREACH_END();
 
-	return true;
+	*out_val = NULL;
+	return -1;
+}
+
+ZEND_API bool zend_verify_array_element_types(
+	const zend_function *zf, zval *arr, const zend_typed_array_element *elem_type)
+{
+	HashTable *ht = Z_ARRVAL_P(arr);
+	bool valid;
+	zend_class_entry *cached_ce = NULL;
+	const char *expected_type_name;
+
+	/* Fast path: empty arrays always valid */
+	if (zend_hash_num_elements(ht) == 0) {
+		return true;
+	}
+
+	/* Select validation strategy based on type (done once, not per element) */
+	switch (elem_type->type_code) {
+		case IS_LONG:
+			valid = zend_verify_array_elements_long(ht);
+			expected_type_name = "int";
+			break;
+		case IS_DOUBLE:
+			valid = zend_verify_array_elements_double(ht);
+			expected_type_name = "float";
+			break;
+		case IS_STRING:
+			valid = zend_verify_array_elements_string(ht);
+			expected_type_name = "string";
+			break;
+		case _IS_BOOL:
+			valid = zend_verify_array_elements_bool(ht);
+			expected_type_name = "bool";
+			break;
+		case IS_OBJECT:
+			/* Cache class entry - lookup done once, not per element */
+			if (elem_type->class_name) {
+				cached_ce = zend_lookup_class(elem_type->class_name);
+				expected_type_name = ZSTR_VAL(elem_type->class_name);
+			} else {
+				expected_type_name = "object";
+			}
+			valid = zend_verify_array_elements_object(ht, cached_ce);
+			break;
+		default:
+			return true; /* Unknown type, don't validate */
+	}
+
+	/* Fast path: all elements valid */
+	if (EXPECTED(valid)) {
+		return true;
+	}
+
+	/* Slow path (cold): find and report the failing element */
+	zval *failing_val;
+	zend_long failing_idx = zend_find_invalid_array_element(ht, elem_type->type_code, cached_ce, &failing_val);
+	if (failing_idx >= 0 && failing_val) {
+		const char *actual_type_name = zend_zval_type_name(failing_val);
+		zend_verify_array_element_type_error(zf, failing_idx, failing_val, expected_type_name, actual_type_name);
+	}
+	return false;
 }
 
 ZEND_API ZEND_COLD void zend_verify_never_error(const zend_function *zf)
