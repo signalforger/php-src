@@ -874,6 +874,8 @@ type_without_static:
 		T_ARRAY		{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_ARRAY); }
 	|	T_CALLABLE	{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_CALLABLE); }
 	|	name		{ $$ = $1; }
+	|	T_ARRAY '<' type_expr '>'
+			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_OF, $3); }
 ;
 
 union_type_without_static_element:
