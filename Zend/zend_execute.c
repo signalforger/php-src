@@ -1655,8 +1655,8 @@ static zend_always_inline bool zend_verify_array_elements_object(HashTable *ht, 
 	return true;
 }
 
-/* Cold path: find the failing element for error reporting */
-static ZEND_COLD zend_long zend_find_invalid_array_element(
+/* Cold path: find the failing element for error reporting (simple types) */
+static ZEND_COLD zend_long zend_find_invalid_array_element_simple(
 	HashTable *ht, uint8_t type_code, zend_class_entry *cached_ce, zval **out_val)
 {
 	zval *val;
@@ -1704,74 +1704,165 @@ static ZEND_COLD zend_long zend_find_invalid_array_element(
 	return -1;
 }
 
+/* Cold path: find the failing element for error reporting (union/complex types) */
+static ZEND_COLD zend_long zend_find_invalid_array_element_union(
+	HashTable *ht, const zend_type *element_type, zval **out_val)
+{
+	zval *val;
+	zend_ulong idx;
+	zend_string *key;
+	zend_long numeric_idx = 0;
+
+	ZEND_HASH_FOREACH_KEY_VAL(ht, idx, key, val) {
+		zend_long current_idx = key ? numeric_idx : (zend_long)idx;
+
+		if (!zend_check_type(element_type, val, NULL, 0, 0)) {
+			*out_val = val;
+			ZVAL_DEREF(*out_val);
+			return current_idx;
+		}
+		numeric_idx++;
+	} ZEND_HASH_FOREACH_END();
+
+	*out_val = NULL;
+	return -1;
+}
+
+/* Validate array elements against union/complex types */
+static zend_always_inline bool zend_verify_array_elements_union(HashTable *ht, const zend_type *element_type)
+{
+	zval *val;
+
+	ZEND_HASH_FOREACH_VAL(ht, val) {
+		if (!zend_check_type(element_type, val, NULL, 0, 0)) {
+			return false;
+		}
+	} ZEND_HASH_FOREACH_END();
+	return true;
+}
+
+/* Check if a zend_type is a simple single type (for optimization) */
+static zend_always_inline uint8_t zend_get_simple_type_code(const zend_type *type)
+{
+	/* Check if it's a simple type without unions/intersections */
+	if (ZEND_TYPE_HAS_LIST(*type)) {
+		return 0; /* Union or intersection - not simple */
+	}
+
+	uint32_t type_mask = ZEND_TYPE_PURE_MASK(*type);
+
+	/* If there's a class name AND other type bits, it's a union like int|MyClass */
+	if (ZEND_TYPE_HAS_NAME(*type) && type_mask != 0) {
+		return 0; /* Union of class + builtin type - not simple */
+	}
+
+	/* Check for single built-in type */
+	if (type_mask == MAY_BE_LONG) return IS_LONG;
+	if (type_mask == MAY_BE_DOUBLE) return IS_DOUBLE;
+	if (type_mask == MAY_BE_STRING) return IS_STRING;
+	if (type_mask == MAY_BE_BOOL) return _IS_BOOL;
+	if (type_mask == MAY_BE_ARRAY) return IS_ARRAY;
+
+	/* Check for object type (with or without class name) */
+	if (type_mask == MAY_BE_OBJECT) {
+		return IS_OBJECT;
+	}
+
+	/* Check for class name only (no other type bits) */
+	if (ZEND_TYPE_HAS_NAME(*type)) {
+		return IS_OBJECT;
+	}
+
+	return 0; /* Complex type */
+}
+
 ZEND_API bool zend_verify_array_element_types(
 	const zend_function *zf, zval *arr, const zend_typed_array_element *elem_type)
 {
 	HashTable *ht = Z_ARRVAL_P(arr);
 	bool valid;
 	zend_class_entry *cached_ce = NULL;
-	const char *expected_type_name;
+	zend_string *expected_type_str = NULL;
 
 	/* Fast path: empty arrays always valid */
 	if (zend_hash_num_elements(ht) == 0) {
 		return true;
 	}
 
+	/* Check if this is a simple type (for optimized fast paths) */
+	uint8_t simple_type = zend_get_simple_type_code(&elem_type->element_type);
+
 	/* Fast path: check if array was already validated for this type */
-	/* Skip cache for object types with class names (would need class pointer in cache) */
-	if (HT_ELEM_TYPE_IS_VALID(ht) &&
-		HT_VALIDATED_ELEM_TYPE(ht) == elem_type->type_code &&
-		(elem_type->type_code != IS_OBJECT || elem_type->class_name == NULL)) {
+	/* Only works for simple types without class names */
+	if (simple_type != 0 && HT_ELEM_TYPE_IS_VALID(ht) &&
+		HT_VALIDATED_ELEM_TYPE(ht) == simple_type &&
+		(simple_type != IS_OBJECT || !ZEND_TYPE_HAS_NAME(elem_type->element_type))) {
 		return true;
 	}
 
-	/* Select validation strategy based on type (done once, not per element) */
-	switch (elem_type->type_code) {
-		case IS_LONG:
-			valid = zend_verify_array_elements_long(ht);
-			expected_type_name = "int";
-			break;
-		case IS_DOUBLE:
-			valid = zend_verify_array_elements_double(ht);
-			expected_type_name = "float";
-			break;
-		case IS_STRING:
-			valid = zend_verify_array_elements_string(ht);
-			expected_type_name = "string";
-			break;
-		case _IS_BOOL:
-			valid = zend_verify_array_elements_bool(ht);
-			expected_type_name = "bool";
-			break;
-		case IS_OBJECT:
-			/* Cache class entry - lookup done once, not per element */
-			if (elem_type->class_name) {
-				cached_ce = zend_lookup_class(elem_type->class_name);
-				expected_type_name = ZSTR_VAL(elem_type->class_name);
-			} else {
-				expected_type_name = "object";
+	/* Select validation strategy based on type */
+	if (simple_type != 0) {
+		/* Simple type - use optimized fast paths */
+		switch (simple_type) {
+			case IS_LONG:
+				valid = zend_verify_array_elements_long(ht);
+				break;
+			case IS_DOUBLE:
+				valid = zend_verify_array_elements_double(ht);
+				break;
+			case IS_STRING:
+				valid = zend_verify_array_elements_string(ht);
+				break;
+			case _IS_BOOL:
+				valid = zend_verify_array_elements_bool(ht);
+				break;
+			case IS_OBJECT:
+				if (ZEND_TYPE_HAS_NAME(elem_type->element_type)) {
+					zend_string *class_name = ZEND_TYPE_NAME(elem_type->element_type);
+					cached_ce = zend_lookup_class(class_name);
+				}
+				valid = zend_verify_array_elements_object(ht, cached_ce);
+				break;
+			default:
+				valid = true;
+				break;
+		}
+
+		if (EXPECTED(valid)) {
+			/* Cache the validated type (skip for class-specific object validation) */
+			if (simple_type != IS_OBJECT || !ZEND_TYPE_HAS_NAME(elem_type->element_type)) {
+				HT_SET_VALIDATED_ELEM_TYPE(ht, simple_type);
 			}
-			valid = zend_verify_array_elements_object(ht, cached_ce);
-			break;
-		default:
-			return true; /* Unknown type, don't validate */
+			return true;
+		}
+
+		/* Slow path (cold): find and report the failing element */
+		zval *failing_val;
+		zend_long failing_idx = zend_find_invalid_array_element_simple(ht, simple_type, cached_ce, &failing_val);
+		if (failing_idx >= 0 && failing_val) {
+			expected_type_str = zend_type_to_string(elem_type->element_type);
+			const char *actual_type_name = zend_zval_type_name(failing_val);
+			zend_verify_array_element_type_error(zf, failing_idx, failing_val, ZSTR_VAL(expected_type_str), actual_type_name);
+			zend_string_release(expected_type_str);
+		}
+		return false;
 	}
 
-	/* Fast path: all elements valid - update cache */
+	/* Union/complex type - use generic validation */
+	valid = zend_verify_array_elements_union(ht, &elem_type->element_type);
+
 	if (EXPECTED(valid)) {
-		/* Cache the validated type (skip for class-specific object validation) */
-		if (elem_type->type_code != IS_OBJECT || elem_type->class_name == NULL) {
-			HT_SET_VALIDATED_ELEM_TYPE(ht, elem_type->type_code);
-		}
 		return true;
 	}
 
 	/* Slow path (cold): find and report the failing element */
 	zval *failing_val;
-	zend_long failing_idx = zend_find_invalid_array_element(ht, elem_type->type_code, cached_ce, &failing_val);
+	zend_long failing_idx = zend_find_invalid_array_element_union(ht, &elem_type->element_type, &failing_val);
 	if (failing_idx >= 0 && failing_val) {
+		expected_type_str = zend_type_to_string(elem_type->element_type);
 		const char *actual_type_name = zend_zval_type_name(failing_val);
-		zend_verify_array_element_type_error(zf, failing_idx, failing_val, expected_type_name, actual_type_name);
+		zend_verify_array_element_type_error(zf, failing_idx, failing_val, ZSTR_VAL(expected_type_str), actual_type_name);
+		zend_string_release(expected_type_str);
 	}
 	return false;
 }

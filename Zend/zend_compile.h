@@ -109,12 +109,16 @@ typedef struct _zend_declarables {
 
 /* Array element type info for array<T> syntax */
 typedef struct _zend_typed_array_element {
-	uint8_t type_code;       /* IS_LONG, IS_STRING, etc. or IS_OBJECT for class */
-	zend_string *class_name; /* Class name for object types, NULL otherwise */
+	zend_type element_type;  /* Full type info - supports unions, intersections, classes */
 } zend_typed_array_element;
 
 #define ZEND_TYPED_ARRAY_ELEMENT(t) \
 	((zend_typed_array_element *) (t).ptr)
+
+/* Helper to get simple type code (for caching optimization) */
+#define ZEND_TYPED_ARRAY_SIMPLE_TYPE(elem) \
+	(ZEND_TYPE_IS_ONLY_MASK((elem)->element_type) ? \
+		(uint8_t)ZEND_TYPE_PURE_MASK((elem)->element_type) : 0)
 
 /* Compilation context that is different for each file, but shared between op arrays. */
 typedef struct _zend_file_context {

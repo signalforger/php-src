@@ -2617,26 +2617,64 @@ static void zend_compile_memoized_expr(znode *result, zend_ast *expr) /* {{{ */
 }
 /* }}} */
 
-/* Check if a constant array's elements all match the expected type (compile-time) */
-static bool zend_const_array_elements_match_type(zval *arr, uint8_t expected_type_code)
+/* Check if a constant value matches a type at compile time (for escape analysis) */
+static bool zend_const_value_matches_type(zval *val, const zend_type *type)
+{
+	uint32_t type_mask = ZEND_TYPE_PURE_MASK(*type);
+	uint8_t val_type = Z_TYPE_P(val);
+
+	/* Check simple type masks */
+	if (type_mask & (1u << val_type)) {
+		return true;
+	}
+
+	/* Special case: int can match float type */
+	if ((type_mask & MAY_BE_DOUBLE) && val_type == IS_LONG) {
+		return true;
+	}
+
+	/* Special case: bool matches both TRUE and FALSE */
+	if ((type_mask & MAY_BE_BOOL) && (val_type == IS_TRUE || val_type == IS_FALSE)) {
+		return true;
+	}
+
+	/* Can't verify object/class types at compile time */
+	if (ZEND_TYPE_HAS_NAME(*type) || ZEND_TYPE_HAS_LIST(*type)) {
+		/* Check if it's a union of simple types only */
+		if (ZEND_TYPE_HAS_LIST(*type)) {
+			const zend_type_list *list = ZEND_TYPE_LIST(*type);
+			/* Check each type in the union */
+			for (uint32_t i = 0; i < list->num_types; i++) {
+				const zend_type *single = &list->types[i];
+				/* If any type in union is a class, we can't verify at compile time */
+				if (ZEND_TYPE_HAS_NAME(*single)) {
+					return false;
+				}
+			}
+			/* All types in union are simple - check if value matches any */
+			return (type_mask & (1u << val_type)) ||
+			       ((type_mask & MAY_BE_DOUBLE) && val_type == IS_LONG) ||
+			       ((type_mask & MAY_BE_BOOL) && (val_type == IS_TRUE || val_type == IS_FALSE));
+		}
+		return false;
+	}
+
+	return false;
+}
+
+/* Check if a constant array's elements all match the expected type (compile-time escape analysis) */
+static bool zend_const_array_elements_match_type(zval *arr, const zend_type *element_type)
 {
 	zval *val;
+
+	/* Can't verify object/class types at compile time (unless it's a union of scalars) */
+	if (ZEND_TYPE_HAS_NAME(*element_type)) {
+		return false;
+	}
+
 	ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(arr), val) {
-		switch (expected_type_code) {
-			case IS_LONG:
-				if (Z_TYPE_P(val) != IS_LONG) return false;
-				break;
-			case IS_DOUBLE:
-				if (Z_TYPE_P(val) != IS_DOUBLE && Z_TYPE_P(val) != IS_LONG) return false;
-				break;
-			case IS_STRING:
-				if (Z_TYPE_P(val) != IS_STRING) return false;
-				break;
-			case _IS_BOOL:
-				if (Z_TYPE_P(val) != IS_TRUE && Z_TYPE_P(val) != IS_FALSE) return false;
-				break;
-			default:
-				return false; /* Can't verify object types at compile time */
+		if (!zend_const_value_matches_type(val, element_type)) {
+			return false;
 		}
 	} ZEND_HASH_FOREACH_END();
 	return true;
@@ -2701,9 +2739,9 @@ static void zend_emit_return_type_check(
 			/* Escape analysis: if constant array elements all match the type, skip runtime check */
 			if (Z_TYPE(expr->u.constant) == IS_ARRAY) {
 				const zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(type);
-				if (elem_type && elem_type->type_code != IS_OBJECT) {
-					/* Can verify primitive types at compile time */
-					if (zend_const_array_elements_match_type(&expr->u.constant, elem_type->type_code)) {
+				if (elem_type) {
+					/* Try to verify at compile time (works for primitive types and unions of primitives) */
+					if (zend_const_array_elements_match_type(&expr->u.constant, &elem_type->element_type)) {
 						return; /* All elements match - no runtime check needed */
 					}
 				}
@@ -7136,6 +7174,9 @@ ZEND_API void zend_set_function_arg_flags(zend_function *func) /* {{{ */
 }
 /* }}} */
 
+/* Forward declaration for recursive type compilation */
+static zend_type zend_compile_typename(zend_ast *ast);
+
 static zend_type zend_compile_single_typename(zend_ast *ast)
 {
 	ZEND_ASSERT(!(ast->attr & ZEND_TYPE_NULLABLE));
@@ -7147,27 +7188,12 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 
 		return (zend_type) ZEND_TYPE_INIT_CODE(ast->attr, 0, 0);
 	} else if (ast->kind == ZEND_AST_TYPE_ARRAY_OF) {
-		/* array<T> syntax - store element type info */
+		/* array<T> syntax - store element type info (supports unions, intersections) */
 		zend_ast *element_type_ast = ast->child[0];
 		zend_typed_array_element *elem_type = zend_arena_alloc(&CG(arena), sizeof(zend_typed_array_element));
-		elem_type->class_name = NULL;
-		elem_type->type_code = 0;
 
-		if (element_type_ast->kind == ZEND_AST_TYPE) {
-			/* Built-in type like int, string, float, bool */
-			elem_type->type_code = element_type_ast->attr;
-		} else {
-			/* Class name or built-in type name */
-			zend_string *class_name = zend_ast_get_str(element_type_ast);
-			/* Check for built-in type names first */
-			uint8_t type_code = zend_lookup_builtin_type_by_name(class_name);
-			if (type_code != 0) {
-				elem_type->type_code = type_code;
-			} else {
-				elem_type->type_code = IS_OBJECT;
-				elem_type->class_name = zend_string_copy(class_name);
-			}
-		}
+		/* Use zend_compile_typename to handle all type kinds including unions */
+		elem_type->element_type = zend_compile_typename(element_type_ast);
 
 		zend_type type;
 		type.type_mask = (1u << IS_ARRAY);
