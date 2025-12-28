@@ -2617,11 +2617,25 @@ static void zend_compile_memoized_expr(znode *result, zend_ast *expr) /* {{{ */
 }
 /* }}} */
 
+/* Forward declaration for recursive compile-time array validation */
+static bool zend_const_array_elements_match_type(zval *arr, const zend_type *element_type);
+
 /* Check if a constant value matches a type at compile time (for escape analysis) */
 static bool zend_const_value_matches_type(zval *val, const zend_type *type)
 {
 	uint32_t type_mask = ZEND_TYPE_PURE_MASK(*type);
 	uint8_t val_type = Z_TYPE_P(val);
+
+	/* Handle nested array types: array<T> where T might be another array<U> */
+	if (ZEND_TYPE_HAS_ARRAY_ELEMENT(*type)) {
+		/* This type is array<T> - value must be an array with matching elements */
+		if (val_type != IS_ARRAY) {
+			return false;
+		}
+		/* Recursively validate inner elements */
+		const zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(*type);
+		return zend_const_array_elements_match_type(val, &elem_type->element_type);
+	}
 
 	/* Check simple type masks */
 	if (type_mask & (1u << val_type)) {

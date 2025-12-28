@@ -1705,6 +1705,9 @@ static ZEND_COLD zend_long zend_find_invalid_array_element_simple(
 }
 
 /* Cold path: find the failing element for error reporting (union/complex types) */
+/* Forward declaration for recursive validation */
+static bool zend_verify_nested_array_type(zval *val, const zend_type *element_type);
+
 static ZEND_COLD zend_long zend_find_invalid_array_element_union(
 	HashTable *ht, const zend_type *element_type, zval **out_val)
 {
@@ -1716,7 +1719,14 @@ static ZEND_COLD zend_long zend_find_invalid_array_element_union(
 	ZEND_HASH_FOREACH_KEY_VAL(ht, idx, key, val) {
 		zend_long current_idx = key ? numeric_idx : (zend_long)idx;
 
-		if (!zend_check_type(element_type, val, NULL, 0, 0)) {
+		/* For nested array types, use recursive validation */
+		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(*element_type)) {
+			if (!zend_verify_nested_array_type(val, element_type)) {
+				*out_val = val;
+				ZVAL_DEREF(*out_val);
+				return current_idx;
+			}
+		} else if (!zend_check_type(element_type, val, NULL, 0, 0)) {
 			*out_val = val;
 			ZVAL_DEREF(*out_val);
 			return current_idx;
@@ -1734,10 +1744,51 @@ static zend_always_inline bool zend_verify_array_elements_union(HashTable *ht, c
 	zval *val;
 
 	ZEND_HASH_FOREACH_VAL(ht, val) {
-		if (!zend_check_type(element_type, val, NULL, 0, 0)) {
+		/* Check if element type is a nested array<T> type */
+		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(*element_type)) {
+			/* Nested array type - need recursive validation */
+			if (!zend_verify_nested_array_type(val, element_type)) {
+				return false;
+			}
+		} else if (!zend_check_type(element_type, val, NULL, 0, 0)) {
 			return false;
 		}
 	} ZEND_HASH_FOREACH_END();
+	return true;
+}
+
+/* Recursively validate a value against an array<T> type */
+static bool zend_verify_nested_array_type(zval *val, const zend_type *array_type)
+{
+	/* The value must be an array */
+	if (Z_TYPE_P(val) != IS_ARRAY) {
+		return false;
+	}
+
+	/* Get the inner element type */
+	const zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(*array_type);
+	if (!elem_type) {
+		return true; /* No element type constraint */
+	}
+
+	HashTable *ht = Z_ARRVAL_P(val);
+	zval *inner_val;
+
+	ZEND_HASH_FOREACH_VAL(ht, inner_val) {
+		/* Check if the inner element type is also a nested array<T> */
+		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(elem_type->element_type)) {
+			/* Recurse for deeper nesting */
+			if (!zend_verify_nested_array_type(inner_val, &elem_type->element_type)) {
+				return false;
+			}
+		} else {
+			/* Leaf level - use regular type checking */
+			if (!zend_check_type(&elem_type->element_type, inner_val, NULL, 0, 0)) {
+				return false;
+			}
+		}
+	} ZEND_HASH_FOREACH_END();
+
 	return true;
 }
 
@@ -1754,6 +1805,11 @@ static zend_always_inline uint8_t zend_get_simple_type_code(const zend_type *typ
 	/* If there's a class name AND other type bits, it's a union like int|MyClass */
 	if (ZEND_TYPE_HAS_NAME(*type) && type_mask != 0) {
 		return 0; /* Union of class + builtin type - not simple */
+	}
+
+	/* If it's a nested array<T> type, treat as complex for recursive validation */
+	if (ZEND_TYPE_HAS_ARRAY_ELEMENT(*type)) {
+		return 0; /* Nested array type - needs recursive validation */
 	}
 
 	/* Check for single built-in type */

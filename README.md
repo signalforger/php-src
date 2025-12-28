@@ -14,6 +14,78 @@ web development. Fast, flexible and pragmatic, PHP powers everything from your
 blog to the most popular websites in the world. PHP is distributed under the
 [PHP License v3.01](LICENSE).
 
+---
+
+## Array Shape Return Types (RFC Implementation)
+
+This fork implements **Array Shape Return Types** for PHP, allowing you to specify
+element types for array return values using the `array<T>` syntax.
+
+### Features
+
+- **Basic typed arrays**: `array<int>`, `array<string>`, `array<float>`, `array<bool>`
+- **Object typed arrays**: `array<MyClass>`, `array<DateTime>`
+- **Union types**: `array<int|string>`, `array<MyClass|OtherClass|int>`
+- **Nested arrays**: `array<array<int>>`, `array<array<array<string>>>` (up to 4 levels)
+- **Compile-time validation** for constant arrays (escape analysis optimization)
+- **Runtime validation** with detailed error messages
+
+### Usage
+
+Enable strict array checking with the `strict_arrays` declare:
+
+```php
+<?php
+declare(strict_arrays=1);
+
+// Basic typed array
+function getIds(): array<int> {
+    return [1, 2, 3];
+}
+
+// Union types
+function getValues(): array<int|string> {
+    return [1, "two", 3];
+}
+
+// Object types
+function getUsers(): array<User> {
+    return [new User("Alice"), new User("Bob")];
+}
+
+// Nested arrays (matrix)
+function getMatrix(): array<array<int>> {
+    return [[1, 2], [3, 4], [5, 6]];
+}
+
+// Mixed union with objects
+function getItems(): array<Product|Service|int> {
+    return [new Product(), 42, new Service()];
+}
+```
+
+### Error Handling
+
+When validation fails, a `TypeError` is thrown with details about the failing element:
+
+```php
+function getInts(): array<int> {
+    return [1, "two", 3];  // TypeError: array element at index 1 is string
+}
+```
+
+### Implementation Status
+
+- [x] Parser support for `array<T>` syntax
+- [x] Single type validation (`array<int>`, `array<string>`, etc.)
+- [x] Object/class type validation (`array<MyClass>`)
+- [x] Union type support (`array<int|string|MyClass>`)
+- [x] Nested array support (`array<array<T>>`)
+- [x] Compile-time escape analysis optimization
+- [x] Runtime validation with error reporting
+
+---
+
 [![Push](https://github.com/php/php-src/actions/workflows/push.yml/badge.svg)](https://github.com/php/php-src/actions/workflows/push.yml)
 [![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/php.svg)](https://issues.oss-fuzz.com/issues?q=project:php)
 
