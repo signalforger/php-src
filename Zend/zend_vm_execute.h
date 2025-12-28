@@ -2805,6 +2805,17 @@ static zend_never_inline ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV_
 		HANDLE_EXCEPTION();
 	}
 
+	/* Check array element types if strict_arrays is enabled */
+	if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(op_1) == IS_ARRAY) {
+		const zend_arg_info *arg_info = &EX(func)->common.arg_info[opline->op1.num - 1];
+		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+			zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+			if (!zend_verify_array_arg_element_types(EX(func), opline->op1.num, op_1, elem_type)) {
+				HANDLE_EXCEPTION();
+			}
+		}
+	}
+
 	ZEND_VM_NEXT_OPCODE();
 }
 
@@ -4248,6 +4259,16 @@ recv_init_check_type:
 			if (UNEXPECTED(!zend_verify_recv_arg_type(EX(func), arg_num, param))) {
 				HANDLE_EXCEPTION();
 			}
+			/* Check array element types if strict_arrays is enabled */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(param) == IS_ARRAY) {
+				const zend_arg_info *arg_info = &EX(func)->common.arg_info[arg_num - 1];
+				if (ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+					zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+					if (!zend_verify_array_arg_element_types(EX(func), arg_num, param, elem_type)) {
+						HANDLE_EXCEPTION();
+					}
+				}
+			}
 		}
 	}
 
@@ -4324,6 +4345,18 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_R
 		ZEND_VM_DISPATCH_TO_HELPER(zend_verify_recv_arg_type_helper_SPEC(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU_EX param));
 	}
 
+	/* Check array element types if strict_arrays is enabled */
+	if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(param) == IS_ARRAY) {
+		const zend_arg_info *arg_info = &EX(func)->common.arg_info[arg_num - 1];
+		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+			SAVE_OPLINE();
+			zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+			if (!zend_verify_array_arg_element_types(EX(func), arg_num, param, elem_type)) {
+				HANDLE_EXCEPTION();
+			}
+		}
+	}
+
 	ZEND_VM_NEXT_OPCODE();
 }
 
@@ -4354,6 +4387,14 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_RECV_VARIADIC
 						ZEND_HASH_FILL_FINISH();
 						HANDLE_EXCEPTION();
 					}
+					/* Check array element types if strict_arrays is enabled */
+					if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(param) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+						zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+						if (!zend_verify_array_arg_element_types(EX(func), arg_num, param, elem_type)) {
+							ZEND_HASH_FILL_FINISH();
+							HANDLE_EXCEPTION();
+						}
+					}
 
 					if (Z_OPT_REFCOUNTED_P(param)) Z_ADDREF_P(param);
 					ZEND_HASH_FILL_ADD(param);
@@ -4380,6 +4421,13 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_RECV_VARIADIC
 			ZEND_HASH_MAP_FOREACH_STR_KEY_VAL(EX(extra_named_params), name, param) {
 				if (UNEXPECTED(!zend_verify_variadic_arg_type(EX(func), arg_info, arg_num, param))) {
 					HANDLE_EXCEPTION();
+				}
+				/* Check array element types if strict_arrays is enabled */
+				if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(param) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+					zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+					if (!zend_verify_array_arg_element_types(EX(func), arg_num, param, elem_type)) {
+						HANDLE_EXCEPTION();
+					}
 				}
 				Z_TRY_ADDREF_P(param);
 				zend_hash_add_new(Z_ARRVAL_P(params), name, param);
@@ -59944,6 +59992,16 @@ recv_init_check_type:
 			if (UNEXPECTED(!zend_verify_recv_arg_type(EX(func), arg_num, param))) {
 				HANDLE_EXCEPTION();
 			}
+			/* Check array element types if strict_arrays is enabled */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(param) == IS_ARRAY) {
+				const zend_arg_info *arg_info = &EX(func)->common.arg_info[arg_num - 1];
+				if (ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+					zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+					if (!zend_verify_array_arg_element_types(EX(func), arg_num, param, elem_type)) {
+						HANDLE_EXCEPTION();
+					}
+				}
+			}
 		}
 	}
 
@@ -60020,6 +60078,18 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_RECV_S
 		ZEND_VM_DISPATCH_TO_HELPER(zend_verify_recv_arg_type_helper_SPEC_TAILCALL(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU_EX param));
 	}
 
+	/* Check array element types if strict_arrays is enabled */
+	if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(param) == IS_ARRAY) {
+		const zend_arg_info *arg_info = &EX(func)->common.arg_info[arg_num - 1];
+		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+			SAVE_OPLINE();
+			zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+			if (!zend_verify_array_arg_element_types(EX(func), arg_num, param, elem_type)) {
+				HANDLE_EXCEPTION();
+			}
+		}
+	}
+
 	ZEND_VM_NEXT_OPCODE();
 }
 
@@ -60050,6 +60120,14 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_RECV_VARIADIC_SPEC
 						ZEND_HASH_FILL_FINISH();
 						HANDLE_EXCEPTION();
 					}
+					/* Check array element types if strict_arrays is enabled */
+					if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(param) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+						zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+						if (!zend_verify_array_arg_element_types(EX(func), arg_num, param, elem_type)) {
+							ZEND_HASH_FILL_FINISH();
+							HANDLE_EXCEPTION();
+						}
+					}
 
 					if (Z_OPT_REFCOUNTED_P(param)) Z_ADDREF_P(param);
 					ZEND_HASH_FILL_ADD(param);
@@ -60076,6 +60154,13 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_RECV_VARIADIC_SPEC
 			ZEND_HASH_MAP_FOREACH_STR_KEY_VAL(EX(extra_named_params), name, param) {
 				if (UNEXPECTED(!zend_verify_variadic_arg_type(EX(func), arg_info, arg_num, param))) {
 					HANDLE_EXCEPTION();
+				}
+				/* Check array element types if strict_arrays is enabled */
+				if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(param) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+					zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+					if (!zend_verify_array_arg_element_types(EX(func), arg_num, param, elem_type)) {
+						HANDLE_EXCEPTION();
+					}
 				}
 				Z_TRY_ADDREF_P(param);
 				zend_hash_add_new(Z_ARRVAL_P(params), name, param);
@@ -112279,6 +112364,17 @@ static zend_never_inline ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV_EX  z
 	SAVE_OPLINE();
 	if (UNEXPECTED(!zend_verify_recv_arg_type(EX(func), opline->op1.num, op_1))) {
 		HANDLE_EXCEPTION();
+	}
+
+	/* Check array element types if strict_arrays is enabled */
+	if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(op_1) == IS_ARRAY) {
+		const zend_arg_info *arg_info = &EX(func)->common.arg_info[opline->op1.num - 1];
+		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
+			zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
+			if (!zend_verify_array_arg_element_types(EX(func), opline->op1.num, op_1, elem_type)) {
+				HANDLE_EXCEPTION();
+			}
+		}
 	}
 
 	ZEND_VM_NEXT_OPCODE();

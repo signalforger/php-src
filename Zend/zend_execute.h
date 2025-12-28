@@ -108,8 +108,13 @@ ZEND_API ZEND_COLD void zend_verify_return_error(
 ZEND_API ZEND_COLD void zend_verify_array_element_type_error(
 		const zend_function *zf, zend_long index, const zval *element,
 		const char *expected_type, const char *actual_type);
+ZEND_API ZEND_COLD void zend_verify_array_arg_element_type_error(
+		const zend_function *zf, uint32_t arg_num, zend_long index, const zval *element,
+		const char *expected_type, const char *actual_type);
 ZEND_API bool zend_verify_array_element_types(
 		const zend_function *zf, zval *arr, const zend_typed_array_element *elem_type);
+ZEND_API bool zend_verify_array_arg_element_types(
+		const zend_function *zf, uint32_t arg_num, zval *arr, const zend_typed_array_element *elem_type);
 ZEND_API ZEND_COLD void zend_verify_never_error(
 		const zend_function *zf);
 ZEND_API bool zend_verify_ref_array_assignable(zend_reference *ref);

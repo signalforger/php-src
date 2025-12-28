@@ -1448,6 +1448,16 @@ ZEND_API ZEND_COLD void zend_verify_array_element_type_error(
 		fclass, fsep, fname, expected_type, index, actual_type);
 }
 
+/* Array element type validation for argument with array<T> and strict_arrays */
+ZEND_API ZEND_COLD void zend_verify_array_arg_element_type_error(
+	const zend_function *zf, uint32_t arg_num, zend_long index, const zval *element,
+	const char *expected_type, const char *actual_type)
+{
+	zend_argument_type_error(arg_num,
+		"must be of type array<%s>, array element at index " ZEND_LONG_FMT " is %s",
+		expected_type, index, actual_type);
+}
+
 /*
  * Optimized type-specialized validation functions
  * Key optimizations:
@@ -1918,6 +1928,97 @@ ZEND_API bool zend_verify_array_element_types(
 		expected_type_str = zend_type_to_string(elem_type->element_type);
 		const char *actual_type_name = zend_zval_type_name(failing_val);
 		zend_verify_array_element_type_error(zf, failing_idx, failing_val, ZSTR_VAL(expected_type_str), actual_type_name);
+		zend_string_release(expected_type_str);
+	}
+	return false;
+}
+
+/* Validate array element types for function argument with array<T> */
+ZEND_API bool zend_verify_array_arg_element_types(
+	const zend_function *zf, uint32_t arg_num, zval *arr, const zend_typed_array_element *elem_type)
+{
+	HashTable *ht = Z_ARRVAL_P(arr);
+	bool valid;
+	zend_class_entry *cached_ce = NULL;
+	zend_string *expected_type_str = NULL;
+
+	/* Fast path: empty arrays always valid */
+	if (zend_hash_num_elements(ht) == 0) {
+		return true;
+	}
+
+	/* Check if this is a simple type (for optimized fast paths) */
+	uint8_t simple_type = zend_get_simple_type_code(&elem_type->element_type);
+
+	/* Fast path: check if array was already validated for this type */
+	if (simple_type != 0 && HT_ELEM_TYPE_IS_VALID(ht) &&
+		HT_VALIDATED_ELEM_TYPE(ht) == simple_type &&
+		(simple_type != IS_OBJECT || !ZEND_TYPE_HAS_NAME(elem_type->element_type))) {
+		return true;
+	}
+
+	/* Select validation strategy based on type */
+	if (simple_type != 0) {
+		/* Simple type - use optimized fast paths */
+		switch (simple_type) {
+			case IS_LONG:
+				valid = zend_verify_array_elements_long(ht);
+				break;
+			case IS_DOUBLE:
+				valid = zend_verify_array_elements_double(ht);
+				break;
+			case IS_STRING:
+				valid = zend_verify_array_elements_string(ht);
+				break;
+			case _IS_BOOL:
+				valid = zend_verify_array_elements_bool(ht);
+				break;
+			case IS_OBJECT:
+				if (ZEND_TYPE_HAS_NAME(elem_type->element_type)) {
+					zend_string *class_name = ZEND_TYPE_NAME(elem_type->element_type);
+					cached_ce = zend_lookup_class(class_name);
+				}
+				valid = zend_verify_array_elements_object(ht, cached_ce);
+				break;
+			default:
+				valid = true;
+				break;
+		}
+
+		if (EXPECTED(valid)) {
+			/* Cache the validated type (skip for class-specific object validation) */
+			if (simple_type != IS_OBJECT || !ZEND_TYPE_HAS_NAME(elem_type->element_type)) {
+				HT_SET_VALIDATED_ELEM_TYPE(ht, simple_type);
+			}
+			return true;
+		}
+
+		/* Slow path (cold): find and report the failing element */
+		zval *failing_val;
+		zend_long failing_idx = zend_find_invalid_array_element_simple(ht, simple_type, cached_ce, &failing_val);
+		if (failing_idx >= 0 && failing_val) {
+			expected_type_str = zend_type_to_string(elem_type->element_type);
+			const char *actual_type_name = zend_zval_type_name(failing_val);
+			zend_verify_array_arg_element_type_error(zf, arg_num, failing_idx, failing_val, ZSTR_VAL(expected_type_str), actual_type_name);
+			zend_string_release(expected_type_str);
+		}
+		return false;
+	}
+
+	/* Union/complex type - use generic validation */
+	valid = zend_verify_array_elements_union(ht, &elem_type->element_type);
+
+	if (EXPECTED(valid)) {
+		return true;
+	}
+
+	/* Slow path (cold): find and report the failing element */
+	zval *failing_val;
+	zend_long failing_idx = zend_find_invalid_array_element_union(ht, &elem_type->element_type, &failing_val);
+	if (failing_idx >= 0 && failing_val) {
+		expected_type_str = zend_type_to_string(elem_type->element_type);
+		const char *actual_type_name = zend_zval_type_name(failing_val);
+		zend_verify_array_arg_element_type_error(zf, arg_num, failing_idx, failing_val, ZSTR_VAL(expected_type_str), actual_type_name);
 		zend_string_release(expected_type_str);
 	}
 	return false;
