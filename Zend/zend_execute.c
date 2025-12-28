@@ -1091,6 +1091,15 @@ static zend_never_inline zval* zend_assign_to_typed_prop(const zend_property_inf
 		return &EG(uninitialized_zval);
 	}
 
+	/* Check array element types if strict_arrays is enabled */
+	if (EX_USES_STRICT_ARRAYS() && Z_TYPE(tmp) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_ELEMENT(info->type)) {
+		zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(info->type);
+		if (!zend_verify_array_prop_element_types(info, &tmp, elem_type)) {
+			zval_ptr_dtor(&tmp);
+			return &EG(uninitialized_zval);
+		}
+	}
+
 	Z_PROP_FLAG_P(property_val) &= ~IS_PROP_REINITABLE;
 
 	return zend_assign_to_variable_ex(property_val, &tmp, IS_TMP_VAR, EX_USES_STRICT_TYPES(), garbage_ptr);
@@ -1456,6 +1465,102 @@ ZEND_API ZEND_COLD void zend_verify_array_arg_element_type_error(
 	zend_argument_type_error(arg_num,
 		"must be of type array<%s>, array element at index " ZEND_LONG_FMT " is %s",
 		expected_type, index, actual_type);
+}
+
+/* Array element type validation for property with array<T> and strict_arrays */
+ZEND_API ZEND_COLD void zend_verify_array_prop_element_type_error(
+	const zend_property_info *info, zend_long index, const zval *element,
+	const char *expected_type, const char *actual_type)
+{
+	zend_type_error("Cannot assign to property %s::$%s of type array<%s>, "
+		"array element at index " ZEND_LONG_FMT " is %s",
+		ZSTR_VAL(info->ce->name), ZSTR_VAL(info->name), expected_type,
+		index, actual_type);
+}
+
+/* Array key type validation errors for array<K, V> with strict_arrays */
+ZEND_API ZEND_COLD void zend_verify_array_key_type_error(
+	const zend_function *zf, const char *expected_key_type, const char *actual_key_type)
+{
+	const char *fname = ZSTR_VAL(zf->common.function_name);
+	const char *fsep = zf->common.scope ? "::" : "";
+	const char *fclass = zf->common.scope ? ZSTR_VAL(zf->common.scope->name) : "";
+
+	zend_type_error("%s%s%s(): Return value must be of type array<%s, ...>, "
+		"array contains %s key",
+		fclass, fsep, fname, expected_key_type, actual_key_type);
+}
+
+ZEND_API ZEND_COLD void zend_verify_array_arg_key_type_error(
+	uint32_t arg_num, const char *expected_key_type, const char *actual_key_type)
+{
+	zend_argument_type_error(arg_num,
+		"must be of type array<%s, ...>, array contains %s key",
+		expected_key_type, actual_key_type);
+}
+
+ZEND_API ZEND_COLD void zend_verify_array_prop_key_type_error(
+	const zend_property_info *info, const char *expected_key_type, const char *actual_key_type)
+{
+	zend_type_error("Cannot assign to property %s::$%s of type array<%s, ...>, "
+		"array contains %s key",
+		ZSTR_VAL(info->ce->name), ZSTR_VAL(info->name), expected_key_type, actual_key_type);
+}
+
+/* Key type validation helper - returns true if all keys match expected type */
+static zend_always_inline bool zend_verify_array_key_types(
+	HashTable *ht, uint32_t expected_key_mask)
+{
+	zend_string *str_key;
+	zend_ulong num_key;
+
+	/* Fast path: empty arrays always valid */
+	if (zend_hash_num_elements(ht) == 0) {
+		return true;
+	}
+
+	/* int|string accepts any key */
+	if (expected_key_mask == (MAY_BE_LONG | MAY_BE_STRING)) {
+		return true;
+	}
+
+	bool expects_int = (expected_key_mask == MAY_BE_LONG);
+
+	ZEND_HASH_FOREACH_KEY(ht, num_key, str_key) {
+		if (expects_int) {
+			if (str_key != NULL) {
+				return false;  /* Found string key when expecting int */
+			}
+		} else {
+			/* expects_string */
+			if (str_key == NULL) {
+				return false;  /* Found int key when expecting string */
+			}
+		}
+	} ZEND_HASH_FOREACH_END();
+
+	return true;
+}
+
+/* Find invalid key type for error reporting */
+static zend_always_inline const char *zend_find_invalid_key_type(
+	HashTable *ht, uint32_t expected_key_mask)
+{
+	zend_string *str_key;
+	zend_ulong num_key;
+
+	bool expects_int = (expected_key_mask == MAY_BE_LONG);
+
+	ZEND_HASH_FOREACH_KEY(ht, num_key, str_key) {
+		if (expects_int && str_key != NULL) {
+			return "string";
+		}
+		if (!expects_int && str_key == NULL) {
+			return "int";
+		}
+	} ZEND_HASH_FOREACH_END();
+
+	return "unknown";
 }
 
 /*
@@ -1855,6 +1960,18 @@ ZEND_API bool zend_verify_array_element_types(
 		return true;
 	}
 
+	/* Check key types if specified */
+	if (ZEND_TYPED_ARRAY_HAS_KEY_TYPE(elem_type)) {
+		uint32_t key_mask = ZEND_TYPE_PURE_MASK(elem_type->key_type);
+		if (!zend_verify_array_key_types(ht, key_mask)) {
+			zend_string *key_type_str = zend_type_to_string(elem_type->key_type);
+			const char *actual_key_type = zend_find_invalid_key_type(ht, key_mask);
+			zend_verify_array_key_type_error(zf, ZSTR_VAL(key_type_str), actual_key_type);
+			zend_string_release(key_type_str);
+			return false;
+		}
+	}
+
 	/* Check if this is a simple type (for optimized fast paths) */
 	uint8_t simple_type = zend_get_simple_type_code(&elem_type->element_type);
 
@@ -1947,6 +2064,18 @@ ZEND_API bool zend_verify_array_arg_element_types(
 		return true;
 	}
 
+	/* Check key types if specified */
+	if (ZEND_TYPED_ARRAY_HAS_KEY_TYPE(elem_type)) {
+		uint32_t key_mask = ZEND_TYPE_PURE_MASK(elem_type->key_type);
+		if (!zend_verify_array_key_types(ht, key_mask)) {
+			zend_string *key_type_str = zend_type_to_string(elem_type->key_type);
+			const char *actual_key_type = zend_find_invalid_key_type(ht, key_mask);
+			zend_verify_array_arg_key_type_error(arg_num, ZSTR_VAL(key_type_str), actual_key_type);
+			zend_string_release(key_type_str);
+			return false;
+		}
+	}
+
 	/* Check if this is a simple type (for optimized fast paths) */
 	uint8_t simple_type = zend_get_simple_type_code(&elem_type->element_type);
 
@@ -2019,6 +2148,109 @@ ZEND_API bool zend_verify_array_arg_element_types(
 		expected_type_str = zend_type_to_string(elem_type->element_type);
 		const char *actual_type_name = zend_zval_type_name(failing_val);
 		zend_verify_array_arg_element_type_error(zf, arg_num, failing_idx, failing_val, ZSTR_VAL(expected_type_str), actual_type_name);
+		zend_string_release(expected_type_str);
+	}
+	return false;
+}
+
+/* Validate array element types for property with array<T> */
+ZEND_API bool zend_verify_array_prop_element_types(
+	const zend_property_info *info, zval *arr, const zend_typed_array_element *elem_type)
+{
+	HashTable *ht = Z_ARRVAL_P(arr);
+	bool valid;
+	zend_class_entry *cached_ce = NULL;
+	zend_string *expected_type_str = NULL;
+
+	/* Fast path: empty arrays always valid */
+	if (zend_hash_num_elements(ht) == 0) {
+		return true;
+	}
+
+	/* Check key types if specified */
+	if (ZEND_TYPED_ARRAY_HAS_KEY_TYPE(elem_type)) {
+		uint32_t key_mask = ZEND_TYPE_PURE_MASK(elem_type->key_type);
+		if (!zend_verify_array_key_types(ht, key_mask)) {
+			zend_string *key_type_str = zend_type_to_string(elem_type->key_type);
+			const char *actual_key_type = zend_find_invalid_key_type(ht, key_mask);
+			zend_verify_array_prop_key_type_error(info, ZSTR_VAL(key_type_str), actual_key_type);
+			zend_string_release(key_type_str);
+			return false;
+		}
+	}
+
+	/* Check if this is a simple type (for optimized fast paths) */
+	uint8_t simple_type = zend_get_simple_type_code(&elem_type->element_type);
+
+	/* Fast path: check if array was already validated for this type */
+	if (simple_type != 0 && HT_ELEM_TYPE_IS_VALID(ht) &&
+		HT_VALIDATED_ELEM_TYPE(ht) == simple_type &&
+		(simple_type != IS_OBJECT || !ZEND_TYPE_HAS_NAME(elem_type->element_type))) {
+		return true;
+	}
+
+	/* Select validation strategy based on type */
+	if (simple_type != 0) {
+		/* Simple type - use optimized fast paths */
+		switch (simple_type) {
+			case IS_LONG:
+				valid = zend_verify_array_elements_long(ht);
+				break;
+			case IS_DOUBLE:
+				valid = zend_verify_array_elements_double(ht);
+				break;
+			case IS_STRING:
+				valid = zend_verify_array_elements_string(ht);
+				break;
+			case _IS_BOOL:
+				valid = zend_verify_array_elements_bool(ht);
+				break;
+			case IS_OBJECT:
+				if (ZEND_TYPE_HAS_NAME(elem_type->element_type)) {
+					zend_string *class_name = ZEND_TYPE_NAME(elem_type->element_type);
+					cached_ce = zend_lookup_class(class_name);
+				}
+				valid = zend_verify_array_elements_object(ht, cached_ce);
+				break;
+			default:
+				valid = true;
+				break;
+		}
+
+		if (EXPECTED(valid)) {
+			/* Cache the validated type (skip for class-specific object validation) */
+			if (simple_type != IS_OBJECT || !ZEND_TYPE_HAS_NAME(elem_type->element_type)) {
+				HT_SET_VALIDATED_ELEM_TYPE(ht, simple_type);
+			}
+			return true;
+		}
+
+		/* Slow path (cold): find and report the failing element */
+		zval *failing_val;
+		zend_long failing_idx = zend_find_invalid_array_element_simple(ht, simple_type, cached_ce, &failing_val);
+		if (failing_idx >= 0 && failing_val) {
+			expected_type_str = zend_type_to_string(elem_type->element_type);
+			const char *actual_type_name = zend_zval_type_name(failing_val);
+			zend_verify_array_prop_element_type_error(info, failing_idx, failing_val, ZSTR_VAL(expected_type_str), actual_type_name);
+			zend_string_release(expected_type_str);
+		}
+		return false;
+	}
+
+	/* Union/complex type - use generic validation */
+	valid = zend_verify_array_elements_union(ht, &elem_type->element_type);
+
+	if (EXPECTED(valid)) {
+		return true;
+	}
+
+	/* Slow path (cold): find and report the failing element */
+	zval *failing_val;
+	zend_long failing_idx = zend_find_invalid_array_element_union(ht, &elem_type->element_type, &failing_val);
+	if (failing_idx >= 0 && failing_val) {
+		expected_type_str = zend_type_to_string(elem_type->element_type);
+		const char *actual_type_name = zend_zval_type_name(failing_val);
+		zend_verify_array_prop_element_type_error(info, failing_idx, failing_val, ZSTR_VAL(expected_type_str), actual_type_name);
 		zend_string_release(expected_type_str);
 	}
 	return false;

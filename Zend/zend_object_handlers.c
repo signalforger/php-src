@@ -33,6 +33,7 @@
 #include "zend_hash.h"
 #include "zend_property_hooks.h"
 #include "zend_observer.h"
+#include "zend_execute.h"
 
 #define DEBUG_OBJECT_HANDLERS 0
 
@@ -1002,6 +1003,14 @@ static zend_always_inline bool property_uses_strict_types(void) {
 		&& ZEND_CALL_USES_STRICT_TYPES(EG(current_execute_data));
 }
 
+static zend_always_inline bool property_uses_strict_arrays(void) {
+	zend_execute_data *execute_data = EG(current_execute_data);
+	return execute_data
+		&& execute_data->func
+		&& ZEND_USER_CODE(execute_data->func->type)
+		&& (execute_data->func->op_array.fn_flags & ZEND_ACC_STRICT_ARRAYS);
+}
+
 static zval *forward_write_to_lazy_object(zend_object *zobj,
 		zend_string *name, zval *value, void **cache_slot, bool guarded)
 {
@@ -1097,6 +1106,15 @@ typed_property:
 					zval_ptr_dtor(&tmp);
 					variable_ptr = &EG(error_zval);
 					goto exit;
+				}
+				/* Check array element types if strict_arrays is enabled */
+				if (property_uses_strict_arrays() && Z_TYPE(tmp) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_ELEMENT(prop_info->type)) {
+					zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(prop_info->type);
+					if (!zend_verify_array_prop_element_types(prop_info, &tmp, elem_type)) {
+						zval_ptr_dtor(&tmp);
+						variable_ptr = &EG(error_zval);
+						goto exit;
+					}
 				}
 				Z_PROP_FLAG_P(variable_ptr) &= ~(IS_PROP_UNINIT|IS_PROP_REINITABLE);
 				value = &tmp;

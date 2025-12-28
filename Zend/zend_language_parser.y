@@ -876,6 +876,8 @@ type_without_static:
 	|	name		{ $$ = $1; }
 	|	T_ARRAY '<' type_expr '>'
 			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_OF, $3); }
+	|	T_ARRAY '<' type_expr ',' type_expr '>'
+			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_MAP, $3, $5); }
 	|	T_ARRAY '<' T_ARRAY '<' type_expr T_SR
 			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_OF,
 				zend_ast_create(ZEND_AST_TYPE_ARRAY_OF, $5)); }

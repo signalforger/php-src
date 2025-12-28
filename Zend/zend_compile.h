@@ -107,10 +107,15 @@ typedef struct _zend_declarables {
 	zend_long ticks;
 } zend_declarables;
 
-/* Array element type info for array<T> syntax */
+/* Array element type info for array<T> and array<K, V> syntax */
 typedef struct _zend_typed_array_element {
-	zend_type element_type;  /* Full type info - supports unions, intersections, classes */
+	zend_type element_type;  /* Value type info - supports unions, intersections, classes */
+	zend_type key_type;      /* Key type (int, string, or int|string) - if unset, any key allowed */
 } zend_typed_array_element;
+
+/* Check if key type is specified */
+#define ZEND_TYPED_ARRAY_HAS_KEY_TYPE(elem) \
+	(ZEND_TYPE_IS_SET((elem)->key_type))
 
 #define ZEND_TYPED_ARRAY_ELEMENT(t) \
 	((zend_typed_array_element *) (t).ptr)

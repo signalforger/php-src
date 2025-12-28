@@ -7208,6 +7208,33 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 
 		/* Use zend_compile_typename to handle all type kinds including unions */
 		elem_type->element_type = zend_compile_typename(element_type_ast);
+		/* No key type constraint - initialize to empty */
+		elem_type->key_type = (zend_type) ZEND_TYPE_INIT_NONE(0);
+
+		zend_type type;
+		type.type_mask = (1u << IS_ARRAY);
+		type.ptr = elem_type;
+		return type;
+	} else if (ast->kind == ZEND_AST_TYPE_ARRAY_MAP) {
+		/* array<K, V> syntax - store both key and value type info */
+		zend_ast *key_type_ast = ast->child[0];
+		zend_ast *value_type_ast = ast->child[1];
+		zend_typed_array_element *elem_type = zend_arena_alloc(&CG(arena), sizeof(zend_typed_array_element));
+
+		/* Compile key type - only int, string, or int|string allowed */
+		zend_type key_type = zend_compile_typename(key_type_ast);
+		uint32_t key_mask = ZEND_TYPE_PURE_MASK(key_type);
+
+		/* Validate key type - must be int, string, or int|string */
+		if (!ZEND_TYPE_IS_ONLY_MASK(key_type) ||
+		    (key_mask != MAY_BE_LONG && key_mask != MAY_BE_STRING &&
+		     key_mask != (MAY_BE_LONG | MAY_BE_STRING))) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Array key type must be int, string, or int|string");
+		}
+
+		elem_type->key_type = key_type;
+		elem_type->element_type = zend_compile_typename(value_type_ast);
 
 		zend_type type;
 		type.type_mask = (1u << IS_ARRAY);
