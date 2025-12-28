@@ -2256,78 +2256,105 @@ ZEND_API bool zend_verify_array_prop_element_types(
 	return false;
 }
 
-/* Validate array against shape definition (array{key: type, key?: type}) */
+typedef enum {
+	SHAPE_OK,
+	SHAPE_MISSING_KEY,
+	SHAPE_WRONG_TYPE
+} zend_shape_check_result;
+
+static zend_always_inline zend_shape_check_result zend_check_array_shape(
+	HashTable *ht, const zend_array_shape *shape,
+	const zend_array_shape_element **failed_elem, zval **failed_val)
+{
+	for (uint32_t i = 0; i < shape->num_elements; i++) {
+		const zend_array_shape_element *elem = &shape->elements[i];
+		zval *val = zend_hash_find(ht, elem->key);
+
+		if (val == NULL) {
+			if (!elem->is_optional) {
+				*failed_elem = elem;
+				*failed_val = NULL;
+				return SHAPE_MISSING_KEY;
+			}
+			continue;
+		}
+
+		if (!zend_check_type(&elem->type, val, NULL, 0, false)) {
+			*failed_elem = elem;
+			*failed_val = val;
+			return SHAPE_WRONG_TYPE;
+		}
+	}
+
+	return SHAPE_OK;
+}
+
+static ZEND_COLD void zend_shape_return_error(
+	const zend_function *zf, zend_shape_check_result result,
+	const zend_array_shape_element *elem, zval *val)
+{
+	const char *fname = ZSTR_VAL(zf->common.function_name);
+	const char *fsep = zf->common.scope ? "::" : "";
+	const char *fclass = zf->common.scope ? ZSTR_VAL(zf->common.scope->name) : "";
+
+	if (result == SHAPE_MISSING_KEY) {
+		zend_type_error("%s%s%s(): Return value must be of type array{%s: ...}, "
+			"missing required key \"%s\"",
+			fclass, fsep, fname, ZSTR_VAL(elem->key), ZSTR_VAL(elem->key));
+	} else {
+		zend_string *expected = zend_type_to_string(elem->type);
+		zend_type_error("%s%s%s(): Return value key \"%s\" must be of type %s, %s given",
+			fclass, fsep, fname, ZSTR_VAL(elem->key),
+			ZSTR_VAL(expected), zend_zval_value_name(val));
+		zend_string_release(expected);
+	}
+}
+
+static ZEND_COLD void zend_shape_arg_error(
+	uint32_t arg_num, zend_shape_check_result result,
+	const zend_array_shape_element *elem, zval *val)
+{
+	if (result == SHAPE_MISSING_KEY) {
+		zend_type_error("Argument #%u must be of type array{%s: ...}, "
+			"missing required key \"%s\"",
+			arg_num, ZSTR_VAL(elem->key), ZSTR_VAL(elem->key));
+	} else {
+		zend_string *expected = zend_type_to_string(elem->type);
+		zend_type_error("Argument #%u key \"%s\" must be of type %s, %s given",
+			arg_num, ZSTR_VAL(elem->key), ZSTR_VAL(expected), zend_zval_value_name(val));
+		zend_string_release(expected);
+	}
+}
+
 ZEND_API bool zend_verify_array_shape(
 	const zend_function *zf, zval *arr, const zend_array_shape *shape)
 {
-	HashTable *ht = Z_ARRVAL_P(arr);
+	const zend_array_shape_element *failed_elem;
+	zval *failed_val;
 
-	/* Check each defined key in the shape */
-	for (uint32_t i = 0; i < shape->num_elements; i++) {
-		const zend_array_shape_element *elem = &shape->elements[i];
-		zval *val = zend_hash_find(ht, elem->key);
+	zend_shape_check_result result = zend_check_array_shape(
+		Z_ARRVAL_P(arr), shape, &failed_elem, &failed_val);
 
-		if (val == NULL) {
-			/* Key not present - error if required */
-			if (!elem->is_optional) {
-				zend_type_error("%s%s%s(): Return value must be of type array{%s: ...}, missing required key \"%s\"",
-					zf->common.scope ? ZSTR_VAL(zf->common.scope->name) : "",
-					zf->common.scope ? "::" : "",
-					ZSTR_VAL(zf->common.function_name),
-					ZSTR_VAL(elem->key),
-					ZSTR_VAL(elem->key));
-				return false;
-			}
-			continue;
-		}
-
-		/* Check value type */
-		if (!zend_check_type(&elem->type, val, NULL, 0, false)) {
-			zend_string *expected = zend_type_to_string(elem->type);
-			zend_type_error("%s%s%s(): Return value key \"%s\" must be of type %s, %s given",
-				zf->common.scope ? ZSTR_VAL(zf->common.scope->name) : "",
-				zf->common.scope ? "::" : "",
-				ZSTR_VAL(zf->common.function_name),
-				ZSTR_VAL(elem->key),
-				ZSTR_VAL(expected),
-				zend_zval_value_name(val));
-			zend_string_release(expected);
-			return false;
-		}
+	if (UNEXPECTED(result != SHAPE_OK)) {
+		zend_shape_return_error(zf, result, failed_elem, failed_val);
+		return false;
 	}
-
 	return true;
 }
 
-/* Validate array shape for function argument */
 ZEND_API bool zend_verify_array_arg_shape(
 	uint32_t arg_num, zval *arr, const zend_array_shape *shape)
 {
-	HashTable *ht = Z_ARRVAL_P(arr);
+	const zend_array_shape_element *failed_elem;
+	zval *failed_val;
 
-	/* Check each defined key in the shape */
-	for (uint32_t i = 0; i < shape->num_elements; i++) {
-		const zend_array_shape_element *elem = &shape->elements[i];
-		zval *val = zend_hash_find(ht, elem->key);
+	zend_shape_check_result result = zend_check_array_shape(
+		Z_ARRVAL_P(arr), shape, &failed_elem, &failed_val);
 
-		if (val == NULL) {
-			if (!elem->is_optional) {
-				zend_type_error("Argument #%u must be of type array{%s: ...}, missing required key \"%s\"",
-					arg_num, ZSTR_VAL(elem->key), ZSTR_VAL(elem->key));
-				return false;
-			}
-			continue;
-		}
-
-		if (!zend_check_type(&elem->type, val, NULL, 0, false)) {
-			zend_string *expected = zend_type_to_string(elem->type);
-			zend_type_error("Argument #%u key \"%s\" must be of type %s, %s given",
-				arg_num, ZSTR_VAL(elem->key), ZSTR_VAL(expected), zend_zval_value_name(val));
-			zend_string_release(expected);
-			return false;
-		}
+	if (UNEXPECTED(result != SHAPE_OK)) {
+		zend_shape_arg_error(arg_num, result, failed_elem, failed_val);
+		return false;
 	}
-
 	return true;
 }
 

@@ -194,6 +194,7 @@ void startup_scanner(void)
 	zend_stack_init(&SCNG(nest_location_stack), sizeof(zend_nest_location));
 	zend_ptr_stack_init(&SCNG(heredoc_label_stack));
 	SCNG(heredoc_scan_ahead) = 0;
+	SCNG(type_angle_depth) = 0;
 }
 
 static void heredoc_label_dtor(zend_heredoc_label *heredoc_label) {
@@ -1821,6 +1822,12 @@ OPTIONAL_WHITESPACE_OR_COMMENTS ({WHITESPACE}|{MULTI_LINE_COMMENT}|{SINGLE_LINE_
 	RETURN_TOKEN(T_ARRAY_SHAPE_START);
 }
 
+<ST_IN_SCRIPTING>"array<" {
+	SCNG(type_angle_depth)++;
+	yyless(5); /* push back the '<' */
+	RETURN_TOKEN_WITH_IDENT(T_ARRAY);
+}
+
 <ST_IN_SCRIPTING>"array" {
 	RETURN_TOKEN_WITH_IDENT(T_ARRAY);
 }
@@ -1950,7 +1957,19 @@ OPTIONAL_WHITESPACE_OR_COMMENTS ({WHITESPACE}|{MULTI_LINE_COMMENT}|{SINGLE_LINE_
 }
 
 <ST_IN_SCRIPTING>">>" {
+	if (SCNG(type_angle_depth) > 0) {
+		SCNG(type_angle_depth)--;
+		yyless(1);
+		RETURN_TOKEN('>');
+	}
 	RETURN_TOKEN(T_SR);
+}
+
+<ST_IN_SCRIPTING>">" {
+	if (SCNG(type_angle_depth) > 0) {
+		SCNG(type_angle_depth)--;
+	}
+	RETURN_TOKEN('>');
 }
 
 <ST_IN_SCRIPTING>"&"{OPTIONAL_WHITESPACE_OR_COMMENTS}("$"|"...") {

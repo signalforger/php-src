@@ -881,18 +881,6 @@ type_without_static:
 			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_OF, $3); }
 	|	T_ARRAY '<' type_expr ',' type_expr '>'
 			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_MAP, $3, $5); }
-	|	T_ARRAY '<' T_ARRAY '<' type_expr T_SR
-			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_OF,
-				zend_ast_create(ZEND_AST_TYPE_ARRAY_OF, $5)); }
-	|	T_ARRAY '<' T_ARRAY '<' T_ARRAY '<' type_expr T_SR '>'
-			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_OF,
-				zend_ast_create(ZEND_AST_TYPE_ARRAY_OF,
-					zend_ast_create(ZEND_AST_TYPE_ARRAY_OF, $7))); }
-	|	T_ARRAY '<' T_ARRAY '<' T_ARRAY '<' T_ARRAY '<' type_expr T_SR T_SR
-			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_OF,
-				zend_ast_create(ZEND_AST_TYPE_ARRAY_OF,
-					zend_ast_create(ZEND_AST_TYPE_ARRAY_OF,
-						zend_ast_create(ZEND_AST_TYPE_ARRAY_OF, $9)))); }
 	|	T_ARRAY_SHAPE_START shape_element_list '}'
 			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_SHAPE, $2); }
 	|	T_ARRAY_SHAPE_START '}'

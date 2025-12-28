@@ -367,6 +367,7 @@ struct _zend_php_scanner_globals {
 	zend_stack state_stack;
 	zend_ptr_stack heredoc_label_stack;
 	zend_stack nest_location_stack; /* for syntax error reporting */
+	uint32_t type_angle_depth; /* for splitting >> in array<array<T>> */
 	bool heredoc_scan_ahead;
 	int heredoc_indentation;
 	bool heredoc_indentation_uses_spaces;
