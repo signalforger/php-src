@@ -87,6 +87,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %precedence T_ELSEIF
 %precedence T_ELSE
 
+
 %token <ast> T_LNUMBER   "integer"
 %token <ast> T_DNUMBER   "floating-point number"
 %token <ast> T_STRING    "identifier"
@@ -173,6 +174,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %token <ident> T_NAMESPACE     "'namespace'"
 %token <ident> T_LIST            "'list'"
 %token <ident> T_ARRAY           "'array'"
+%token T_ARRAY_SHAPE_START       "'array{'"
 %token <ident> T_CALLABLE        "'callable'"
 %token <ident> T_LINE            "'__LINE__'"
 %token <ident> T_FILE            "'__FILE__'"
@@ -280,6 +282,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %type <ast> array_pair non_empty_array_pair_list array_pair_list possible_array_pair
 %type <ast> isset_variable type return_type type_expr type_without_static
 %type <ast> identifier type_expr_without_static union_type_without_static_element union_type_without_static intersection_type_without_static
+%type <ast> shape_element_list shape_element
 %type <ast> inline_function union_type_element union_type intersection_type
 %type <ast> attributed_statement attributed_top_statement attributed_class_statement attributed_parameter
 %type <ast> attribute_decl attribute attributes attribute_group namespace_declaration_name
@@ -890,6 +893,24 @@ type_without_static:
 				zend_ast_create(ZEND_AST_TYPE_ARRAY_OF,
 					zend_ast_create(ZEND_AST_TYPE_ARRAY_OF,
 						zend_ast_create(ZEND_AST_TYPE_ARRAY_OF, $9)))); }
+	|	T_ARRAY_SHAPE_START shape_element_list '}'
+			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_SHAPE, $2); }
+	|	T_ARRAY_SHAPE_START '}'
+			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_SHAPE, NULL); }
+;
+
+shape_element_list:
+		shape_element
+			{ $$ = zend_ast_create_list(1, ZEND_AST_SHAPE_ELEMENT_LIST, $1); }
+	|	shape_element_list ',' shape_element
+			{ $$ = zend_ast_list_add($1, $3); }
+;
+
+shape_element:
+		T_STRING ':' type_expr
+			{ $$ = zend_ast_create_ex(ZEND_AST_SHAPE_ELEMENT, 0, $1, $3); }
+	|	T_STRING '?' ':' type_expr
+			{ $$ = zend_ast_create_ex(ZEND_AST_SHAPE_ELEMENT, 1, $1, $4); }
 ;
 
 union_type_without_static_element:

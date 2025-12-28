@@ -90,6 +90,9 @@ PHPAPI zend_class_entry *reflection_type_ptr;
 PHPAPI zend_class_entry *reflection_named_type_ptr;
 PHPAPI zend_class_entry *reflection_intersection_type_ptr;
 PHPAPI zend_class_entry *reflection_union_type_ptr;
+PHPAPI zend_class_entry *reflection_array_type_ptr;
+PHPAPI zend_class_entry *reflection_array_shape_type_ptr;
+PHPAPI zend_class_entry *reflection_array_shape_element_ptr;
 PHPAPI zend_class_entry *reflection_class_ptr;
 PHPAPI zend_class_entry *reflection_object_ptr;
 PHPAPI zend_class_entry *reflection_method_ptr;
@@ -159,6 +162,13 @@ typedef struct _attribute_reference {
 	uint32_t target;
 } attribute_reference;
 
+/* Struct to store array shape element reference for ReflectionArrayShapeElement */
+typedef struct _array_shape_element_reference {
+	zend_string *key;
+	zend_type type;
+	bool is_optional;
+} array_shape_element_reference;
+
 typedef enum {
 	REF_TYPE_OTHER,      /* Must be 0 */
 	REF_TYPE_FUNCTION,
@@ -168,7 +178,8 @@ typedef enum {
 	REF_TYPE_TYPE,
 	REF_TYPE_PROPERTY,
 	REF_TYPE_CLASS_CONSTANT,
-	REF_TYPE_ATTRIBUTE
+	REF_TYPE_ATTRIBUTE,
+	REF_TYPE_ARRAY_SHAPE_ELEMENT
 } reflection_type_t;
 
 /* Struct for reflection objects */
@@ -268,6 +279,12 @@ static void reflection_free_objects_storage(zend_object *object) /* {{{ */
 				zend_string_release(attr_ref->filename);
 			}
 			efree(intern->ptr);
+			break;
+		}
+		case REF_TYPE_ARRAY_SHAPE_ELEMENT: {
+			array_shape_element_reference *elem_ref = intern->ptr;
+			zend_string_release(elem_ref->key);
+			efree(elem_ref);
 			break;
 		}
 		case REF_TYPE_GENERATOR:
@@ -1480,7 +1497,9 @@ static void reflection_parameter_factory(zend_function *fptr, zval *closure_obje
 typedef enum {
 	NAMED_TYPE = 0,
 	UNION_TYPE = 1,
-	INTERSECTION_TYPE = 2
+	INTERSECTION_TYPE = 2,
+	ARRAY_TYPE = 3,
+	ARRAY_SHAPE_TYPE = 4
 } reflection_type_kind;
 
 /* For backwards compatibility reasons, we need to return T|null style unions
@@ -1489,6 +1508,16 @@ typedef enum {
  * what doesn't. */
 static reflection_type_kind get_type_kind(zend_type type) {
 	uint32_t type_mask_without_null = ZEND_TYPE_PURE_MASK_WITHOUT_NULL(type);
+
+	/* Check for array shapes (array{key: type, ...}) first */
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(type)) {
+		return ARRAY_SHAPE_TYPE;
+	}
+
+	/* Check for typed arrays (array<T> or array<K, V>) */
+	if (ZEND_TYPE_HAS_ARRAY_ELEMENT(type)) {
+		return ARRAY_TYPE;
+	}
 
 	if (ZEND_TYPE_HAS_LIST(type)) {
 		if (ZEND_TYPE_IS_INTERSECTION(type)) {
@@ -1536,6 +1565,12 @@ static void reflection_type_factory(zend_type type, zval *object, bool legacy_be
 			break;
 		case NAMED_TYPE:
 			object_init_ex(object, reflection_named_type_ptr);
+			break;
+		case ARRAY_TYPE:
+			object_init_ex(object, reflection_array_type_ptr);
+			break;
+		case ARRAY_SHAPE_TYPE:
+			object_init_ex(object, reflection_array_shape_type_ptr);
 			break;
 		EMPTY_SWITCH_DEFAULT_CASE();
 	}
@@ -3259,6 +3294,171 @@ ZEND_METHOD(ReflectionIntersectionType, getTypes)
 	ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(param->type), list_type) {
 		append_type(return_value, *list_type);
 	} ZEND_TYPE_LIST_FOREACH_END();
+}
+/* }}} */
+
+/* {{{ Returns the element (value) type of the typed array */
+ZEND_METHOD(ReflectionArrayType, getElementType)
+{
+	reflection_object *intern;
+	type_reference *param;
+	zend_typed_array_element *elem_type;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_ARRAY_ELEMENT(param->type));
+	elem_type = ZEND_TYPED_ARRAY_ELEMENT(param->type);
+
+	reflection_type_factory(elem_type->element_type, return_value, 0);
+}
+/* }}} */
+
+/* {{{ Returns the key type of the typed array, or null if not specified */
+ZEND_METHOD(ReflectionArrayType, getKeyType)
+{
+	reflection_object *intern;
+	type_reference *param;
+	zend_typed_array_element *elem_type;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_ARRAY_ELEMENT(param->type));
+	elem_type = ZEND_TYPED_ARRAY_ELEMENT(param->type);
+
+	if (!ZEND_TYPED_ARRAY_HAS_KEY_TYPE(elem_type)) {
+		RETURN_NULL();
+	}
+
+	reflection_type_factory(elem_type->key_type, return_value, 0);
+}
+/* }}} */
+
+/* {{{ Returns whether a key type was explicitly specified */
+ZEND_METHOD(ReflectionArrayType, hasKeyType)
+{
+	reflection_object *intern;
+	type_reference *param;
+	zend_typed_array_element *elem_type;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_ARRAY_ELEMENT(param->type));
+	elem_type = ZEND_TYPED_ARRAY_ELEMENT(param->type);
+
+	RETURN_BOOL(ZEND_TYPED_ARRAY_HAS_KEY_TYPE(elem_type));
+}
+/* }}} */
+
+/* {{{ Returns an array of ReflectionArrayShapeElement objects */
+ZEND_METHOD(ReflectionArrayShapeType, getElements)
+{
+	reflection_object *intern;
+	type_reference *param;
+	zend_array_shape *shape;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_ARRAY_SHAPE(param->type));
+	shape = ZEND_ARRAY_SHAPE(param->type);
+
+	array_init_size(return_value, shape->num_elements);
+
+	for (uint32_t i = 0; i < shape->num_elements; i++) {
+		const zend_array_shape_element *elem = &shape->elements[i];
+		zval element_obj;
+		reflection_object *elem_intern;
+		array_shape_element_reference *elem_ref;
+
+		object_init_ex(&element_obj, reflection_array_shape_element_ptr);
+		elem_intern = Z_REFLECTION_P(&element_obj);
+
+		elem_ref = emalloc(sizeof(array_shape_element_reference));
+		elem_ref->key = zend_string_copy(elem->key);
+		elem_ref->type = elem->type;
+		elem_ref->is_optional = elem->is_optional;
+
+		elem_intern->ptr = elem_ref;
+		elem_intern->ref_type = REF_TYPE_ARRAY_SHAPE_ELEMENT;
+
+		zend_hash_next_index_insert(Z_ARRVAL_P(return_value), &element_obj);
+	}
+}
+/* }}} */
+
+/* {{{ Returns the number of elements in the shape */
+ZEND_METHOD(ReflectionArrayShapeType, getElementCount)
+{
+	reflection_object *intern;
+	type_reference *param;
+	zend_array_shape *shape;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_ARRAY_SHAPE(param->type));
+	shape = ZEND_ARRAY_SHAPE(param->type);
+
+	RETURN_LONG(shape->num_elements);
+}
+/* }}} */
+
+/* {{{ Returns the number of required (non-optional) elements in the shape */
+ZEND_METHOD(ReflectionArrayShapeType, getRequiredElementCount)
+{
+	reflection_object *intern;
+	type_reference *param;
+	zend_array_shape *shape;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_ARRAY_SHAPE(param->type));
+	shape = ZEND_ARRAY_SHAPE(param->type);
+
+	RETURN_LONG(shape->num_required);
+}
+/* }}} */
+
+/* {{{ Returns the key name of this array shape element */
+ZEND_METHOD(ReflectionArrayShapeElement, getName)
+{
+	reflection_object *intern;
+	array_shape_element_reference *elem_ref;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(elem_ref);
+
+	RETURN_STR_COPY(elem_ref->key);
+}
+/* }}} */
+
+/* {{{ Returns the type of this array shape element */
+ZEND_METHOD(ReflectionArrayShapeElement, getType)
+{
+	reflection_object *intern;
+	array_shape_element_reference *elem_ref;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(elem_ref);
+
+	reflection_type_factory(elem_ref->type, return_value, 0);
+}
+/* }}} */
+
+/* {{{ Returns whether this array shape element is optional */
+ZEND_METHOD(ReflectionArrayShapeElement, isOptional)
+{
+	reflection_object *intern;
+	array_shape_element_reference *elem_ref;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(elem_ref);
+
+	RETURN_BOOL(elem_ref->is_optional);
 }
 /* }}} */
 
@@ -7974,6 +8174,18 @@ PHP_MINIT_FUNCTION(reflection) /* {{{ */
 	reflection_intersection_type_ptr = register_class_ReflectionIntersectionType(reflection_type_ptr);
 	reflection_intersection_type_ptr->create_object = reflection_objects_new;
 	reflection_intersection_type_ptr->default_object_handlers = &reflection_object_handlers;
+
+	reflection_array_type_ptr = register_class_ReflectionArrayType(reflection_type_ptr);
+	reflection_array_type_ptr->create_object = reflection_objects_new;
+	reflection_array_type_ptr->default_object_handlers = &reflection_object_handlers;
+
+	reflection_array_shape_type_ptr = register_class_ReflectionArrayShapeType(reflection_type_ptr);
+	reflection_array_shape_type_ptr->create_object = reflection_objects_new;
+	reflection_array_shape_type_ptr->default_object_handlers = &reflection_object_handlers;
+
+	reflection_array_shape_element_ptr = register_class_ReflectionArrayShapeElement();
+	reflection_array_shape_element_ptr->create_object = reflection_objects_new;
+	reflection_array_shape_element_ptr->default_object_handlers = &reflection_object_handlers;
 
 	reflection_method_ptr = register_class_ReflectionMethod(reflection_function_abstract_ptr);
 	reflection_method_ptr->create_object = reflection_objects_new;

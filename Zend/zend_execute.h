@@ -126,6 +126,10 @@ ZEND_API ZEND_COLD void zend_verify_array_arg_key_type_error(
 		uint32_t arg_num, const char *expected_key_type, const char *actual_key_type);
 ZEND_API ZEND_COLD void zend_verify_array_prop_key_type_error(
 		const zend_property_info *info, const char *expected_key_type, const char *actual_key_type);
+ZEND_API bool zend_verify_array_shape(
+		const zend_function *zf, zval *arr, const zend_array_shape *shape);
+ZEND_API bool zend_verify_array_arg_shape(
+		uint32_t arg_num, zval *arr, const zend_array_shape *shape);
 ZEND_API ZEND_COLD void zend_verify_never_error(
 		const zend_function *zf);
 ZEND_API bool zend_verify_ref_array_assignable(zend_reference *ref);

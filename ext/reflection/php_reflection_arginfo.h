@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: fd645a0b0db39d94ca25b39ffe64d7f05bad6bea */
+ * Stub hash: c97b7ea319ee1ecb650ad7adbace3a85b9737dfa */
 
 ZEND_BEGIN_ARG_WITH_TENTATIVE_RETURN_TYPE_INFO_EX(arginfo_class_Reflection_getModifierNames, 0, 1, IS_ARRAY, 0)
 	ZEND_ARG_TYPE_INFO(0, modifiers, IS_LONG, 0)
@@ -574,6 +574,25 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_class_ReflectionIntersectionType_getTypes arginfo_class_ReflectionFunctionAbstract_getClosureUsedVariables
 
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_class_ReflectionArrayType_getElementType, 0, 0, ReflectionType, 0)
+ZEND_END_ARG_INFO()
+
+#define arginfo_class_ReflectionArrayType_getKeyType arginfo_class_ReflectionFunctionAbstract_getTentativeReturnType
+
+#define arginfo_class_ReflectionArrayType_hasKeyType arginfo_class_ReflectionFunctionAbstract_hasTentativeReturnType
+
+#define arginfo_class_ReflectionArrayShapeType_getElements arginfo_class_ReflectionFunctionAbstract_getClosureUsedVariables
+
+#define arginfo_class_ReflectionArrayShapeType_getElementCount arginfo_class_ReflectionGenerator_getExecutingLine
+
+#define arginfo_class_ReflectionArrayShapeType_getRequiredElementCount arginfo_class_ReflectionGenerator_getExecutingLine
+
+#define arginfo_class_ReflectionArrayShapeElement_getName arginfo_class_ReflectionFunction___toString
+
+#define arginfo_class_ReflectionArrayShapeElement_getType arginfo_class_ReflectionArrayType_getElementType
+
+#define arginfo_class_ReflectionArrayShapeElement_isOptional arginfo_class_ReflectionFunctionAbstract_hasTentativeReturnType
+
 #define arginfo_class_ReflectionExtension___clone arginfo_class_ReflectionFunctionAbstract___clone
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_ReflectionExtension___construct, 0, 0, 1)
@@ -935,6 +954,15 @@ ZEND_METHOD(ReflectionNamedType, getName);
 ZEND_METHOD(ReflectionNamedType, isBuiltin);
 ZEND_METHOD(ReflectionUnionType, getTypes);
 ZEND_METHOD(ReflectionIntersectionType, getTypes);
+ZEND_METHOD(ReflectionArrayType, getElementType);
+ZEND_METHOD(ReflectionArrayType, getKeyType);
+ZEND_METHOD(ReflectionArrayType, hasKeyType);
+ZEND_METHOD(ReflectionArrayShapeType, getElements);
+ZEND_METHOD(ReflectionArrayShapeType, getElementCount);
+ZEND_METHOD(ReflectionArrayShapeType, getRequiredElementCount);
+ZEND_METHOD(ReflectionArrayShapeElement, getName);
+ZEND_METHOD(ReflectionArrayShapeElement, getType);
+ZEND_METHOD(ReflectionArrayShapeElement, isOptional);
 ZEND_METHOD(ReflectionExtension, __construct);
 ZEND_METHOD(ReflectionExtension, __toString);
 ZEND_METHOD(ReflectionExtension, getName);
@@ -1265,6 +1293,27 @@ static const zend_function_entry class_ReflectionUnionType_methods[] = {
 
 static const zend_function_entry class_ReflectionIntersectionType_methods[] = {
 	ZEND_ME(ReflectionIntersectionType, getTypes, arginfo_class_ReflectionIntersectionType_getTypes, ZEND_ACC_PUBLIC)
+	ZEND_FE_END
+};
+
+static const zend_function_entry class_ReflectionArrayType_methods[] = {
+	ZEND_ME(ReflectionArrayType, getElementType, arginfo_class_ReflectionArrayType_getElementType, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionArrayType, getKeyType, arginfo_class_ReflectionArrayType_getKeyType, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionArrayType, hasKeyType, arginfo_class_ReflectionArrayType_hasKeyType, ZEND_ACC_PUBLIC)
+	ZEND_FE_END
+};
+
+static const zend_function_entry class_ReflectionArrayShapeType_methods[] = {
+	ZEND_ME(ReflectionArrayShapeType, getElements, arginfo_class_ReflectionArrayShapeType_getElements, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionArrayShapeType, getElementCount, arginfo_class_ReflectionArrayShapeType_getElementCount, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionArrayShapeType, getRequiredElementCount, arginfo_class_ReflectionArrayShapeType_getRequiredElementCount, ZEND_ACC_PUBLIC)
+	ZEND_FE_END
+};
+
+static const zend_function_entry class_ReflectionArrayShapeElement_methods[] = {
+	ZEND_ME(ReflectionArrayShapeElement, getName, arginfo_class_ReflectionArrayShapeElement_getName, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionArrayShapeElement, getType, arginfo_class_ReflectionArrayShapeElement_getType, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionArrayShapeElement, isOptional, arginfo_class_ReflectionArrayShapeElement_isOptional, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
@@ -1784,6 +1833,36 @@ static zend_class_entry *register_class_ReflectionIntersectionType(zend_class_en
 
 	INIT_CLASS_ENTRY(ce, "ReflectionIntersectionType", class_ReflectionIntersectionType_methods);
 	class_entry = zend_register_internal_class_with_flags(&ce, class_entry_ReflectionType, 0);
+
+	return class_entry;
+}
+
+static zend_class_entry *register_class_ReflectionArrayType(zend_class_entry *class_entry_ReflectionType)
+{
+	zend_class_entry ce, *class_entry;
+
+	INIT_CLASS_ENTRY(ce, "ReflectionArrayType", class_ReflectionArrayType_methods);
+	class_entry = zend_register_internal_class_with_flags(&ce, class_entry_ReflectionType, 0);
+
+	return class_entry;
+}
+
+static zend_class_entry *register_class_ReflectionArrayShapeType(zend_class_entry *class_entry_ReflectionType)
+{
+	zend_class_entry ce, *class_entry;
+
+	INIT_CLASS_ENTRY(ce, "ReflectionArrayShapeType", class_ReflectionArrayShapeType_methods);
+	class_entry = zend_register_internal_class_with_flags(&ce, class_entry_ReflectionType, 0);
+
+	return class_entry;
+}
+
+static zend_class_entry *register_class_ReflectionArrayShapeElement(void)
+{
+	zend_class_entry ce, *class_entry;
+
+	INIT_CLASS_ENTRY(ce, "ReflectionArrayShapeElement", class_ReflectionArrayShapeElement_methods);
+	class_entry = zend_register_internal_class_with_flags(&ce, NULL, 0);
 
 	return class_entry;
 }

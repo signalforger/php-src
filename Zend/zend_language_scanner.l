@@ -1814,6 +1814,13 @@ OPTIONAL_WHITESPACE_OR_COMMENTS ({WHITESPACE}|{MULTI_LINE_COMMENT}|{SINGLE_LINE_
 	RETURN_TOKEN_WITH_IDENT(T_LIST);
 }
 
+<ST_IN_SCRIPTING>"array{" {
+	/* Return T_ARRAY_SHAPE_START for array shape syntax (no whitespace between array and {)
+	 * We must call enter_nesting since we consumed the { character */
+	enter_nesting('{');
+	RETURN_TOKEN(T_ARRAY_SHAPE_START);
+}
+
 <ST_IN_SCRIPTING>"array" {
 	RETURN_TOKEN_WITH_IDENT(T_ARRAY);
 }

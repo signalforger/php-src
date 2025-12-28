@@ -2746,8 +2746,8 @@ static void zend_emit_return_type_check(
 		}
 
 		if (expr && expr->op_type == IS_CONST && ZEND_TYPE_CONTAINS_CODE(type, Z_TYPE(expr->u.constant))) {
-			/* we don't need run-time check, unless we have array element type info to validate */
-			if (!ZEND_TYPE_HAS_ARRAY_ELEMENT(type)) {
+			/* we don't need run-time check, unless we have array element type info or shape to validate */
+			if (!ZEND_TYPE_HAS_ARRAY_ELEMENT(type) && !ZEND_TYPE_HAS_ARRAY_SHAPE(type)) {
 				return;
 			}
 			/* Escape analysis: if constant array elements all match the type, skip runtime check */
@@ -7241,7 +7241,40 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 		type.ptr = elem_type;
 		return type;
 	} else if (ast->kind == ZEND_AST_TYPE_ARRAY_SHAPE) {
-		return (zend_type) ZEND_TYPE_INIT_CODE(IS_ARRAY, 0, 0);
+		/* array{key: type, key?: type, ...} syntax */
+		zend_ast *element_list = ast->child[0];
+		uint32_t num_elements = element_list ? zend_ast_get_list(element_list)->children : 0;
+		uint32_t num_required = 0;
+
+		/* Allocate shape structure with flexible array member */
+		size_t shape_size = sizeof(zend_array_shape) + num_elements * sizeof(zend_array_shape_element);
+		zend_array_shape *shape = zend_arena_alloc(&CG(arena), shape_size);
+		shape->num_elements = num_elements;
+
+		/* Compile each shape element */
+		if (element_list) {
+			zend_ast_list *list = zend_ast_get_list(element_list);
+			for (uint32_t i = 0; i < num_elements; i++) {
+				zend_ast *elem_ast = list->child[i];
+				zend_ast *key_ast = elem_ast->child[0];
+				zend_ast *type_ast = elem_ast->child[1];
+				bool is_optional = (elem_ast->attr != 0);
+
+				shape->elements[i].key = zend_string_copy(zend_ast_get_str(key_ast));
+				shape->elements[i].type = zend_compile_typename(type_ast);
+				shape->elements[i].is_optional = is_optional;
+
+				if (!is_optional) {
+					num_required++;
+				}
+			}
+		}
+		shape->num_required = num_required;
+
+		zend_type type;
+		type.type_mask = (1u << IS_ARRAY) | _ZEND_TYPE_ARRAY_SHAPE_BIT;
+		type.ptr = shape;
+		return type;
 	} else {
 		zend_string *type_name = zend_ast_get_str(ast);
 		uint8_t type_code = zend_lookup_builtin_type_by_name(type_name);

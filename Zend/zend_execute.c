@@ -2256,6 +2256,81 @@ ZEND_API bool zend_verify_array_prop_element_types(
 	return false;
 }
 
+/* Validate array against shape definition (array{key: type, key?: type}) */
+ZEND_API bool zend_verify_array_shape(
+	const zend_function *zf, zval *arr, const zend_array_shape *shape)
+{
+	HashTable *ht = Z_ARRVAL_P(arr);
+
+	/* Check each defined key in the shape */
+	for (uint32_t i = 0; i < shape->num_elements; i++) {
+		const zend_array_shape_element *elem = &shape->elements[i];
+		zval *val = zend_hash_find(ht, elem->key);
+
+		if (val == NULL) {
+			/* Key not present - error if required */
+			if (!elem->is_optional) {
+				zend_type_error("%s%s%s(): Return value must be of type array{%s: ...}, missing required key \"%s\"",
+					zf->common.scope ? ZSTR_VAL(zf->common.scope->name) : "",
+					zf->common.scope ? "::" : "",
+					ZSTR_VAL(zf->common.function_name),
+					ZSTR_VAL(elem->key),
+					ZSTR_VAL(elem->key));
+				return false;
+			}
+			continue;
+		}
+
+		/* Check value type */
+		if (!zend_check_type(&elem->type, val, NULL, 0, false)) {
+			zend_string *expected = zend_type_to_string(elem->type);
+			zend_type_error("%s%s%s(): Return value key \"%s\" must be of type %s, %s given",
+				zf->common.scope ? ZSTR_VAL(zf->common.scope->name) : "",
+				zf->common.scope ? "::" : "",
+				ZSTR_VAL(zf->common.function_name),
+				ZSTR_VAL(elem->key),
+				ZSTR_VAL(expected),
+				zend_zval_value_name(val));
+			zend_string_release(expected);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/* Validate array shape for function argument */
+ZEND_API bool zend_verify_array_arg_shape(
+	uint32_t arg_num, zval *arr, const zend_array_shape *shape)
+{
+	HashTable *ht = Z_ARRVAL_P(arr);
+
+	/* Check each defined key in the shape */
+	for (uint32_t i = 0; i < shape->num_elements; i++) {
+		const zend_array_shape_element *elem = &shape->elements[i];
+		zval *val = zend_hash_find(ht, elem->key);
+
+		if (val == NULL) {
+			if (!elem->is_optional) {
+				zend_type_error("Argument #%u must be of type array{%s: ...}, missing required key \"%s\"",
+					arg_num, ZSTR_VAL(elem->key), ZSTR_VAL(elem->key));
+				return false;
+			}
+			continue;
+		}
+
+		if (!zend_check_type(&elem->type, val, NULL, 0, false)) {
+			zend_string *expected = zend_type_to_string(elem->type);
+			zend_type_error("Argument #%u key \"%s\" must be of type %s, %s given",
+				arg_num, ZSTR_VAL(elem->key), ZSTR_VAL(expected), zend_zval_value_name(val));
+			zend_string_release(expected);
+			return false;
+		}
+	}
+
+	return true;
+}
+
 ZEND_API ZEND_COLD void zend_verify_never_error(const zend_function *zf)
 {
 	zend_string *func_name = get_function_or_method_name(zf);

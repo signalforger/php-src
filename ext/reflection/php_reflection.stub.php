@@ -744,6 +744,44 @@ class ReflectionIntersectionType extends ReflectionType
     public function getTypes(): array {}
 }
 
+class ReflectionArrayType extends ReflectionType
+{
+    /** Get the element (value) type of the array */
+    public function getElementType(): ReflectionType {}
+
+    /** Get the key type of the array, or null if not specified */
+    public function getKeyType(): ?ReflectionType {}
+
+    /** Check if a key type was explicitly specified */
+    public function hasKeyType(): bool {}
+}
+
+/** Represents an array shape type like array{name: string, age?: int} */
+class ReflectionArrayShapeType extends ReflectionType
+{
+    /** Get the elements defined in the shape */
+    public function getElements(): array {}
+
+    /** Get the number of elements in the shape */
+    public function getElementCount(): int {}
+
+    /** Get the number of required (non-optional) elements */
+    public function getRequiredElementCount(): int {}
+}
+
+/** Represents an element in an array shape type */
+class ReflectionArrayShapeElement
+{
+    /** Get the key name */
+    public function getName(): string {}
+
+    /** Get the type of this element */
+    public function getType(): ReflectionType {}
+
+    /** Check if this element is optional */
+    public function isOptional(): bool {}
+}
+
 /** @not-serializable */
 class ReflectionExtension implements Reflector
 {

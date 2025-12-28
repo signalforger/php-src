@@ -125,6 +125,28 @@ typedef struct _zend_typed_array_element {
 	(ZEND_TYPE_IS_ONLY_MASK((elem)->element_type) ? \
 		(uint8_t)ZEND_TYPE_PURE_MASK((elem)->element_type) : 0)
 
+/* Array shape element for array{key: type, key?: type} syntax */
+typedef struct _zend_array_shape_element {
+	zend_string *key;        /* Key name */
+	zend_type type;          /* Value type */
+	bool is_optional;        /* Whether this key is optional (key?: type) */
+} zend_array_shape_element;
+
+/* Array shape info for array{...} syntax */
+typedef struct _zend_array_shape {
+	uint32_t num_elements;               /* Number of shape elements */
+	uint32_t num_required;               /* Number of required (non-optional) elements */
+	zend_array_shape_element elements[]; /* Flexible array member */
+} zend_array_shape;
+
+/* Check if type has array shape */
+#define ZEND_TYPE_HAS_ARRAY_SHAPE(t) \
+	(((t).type_mask & _ZEND_TYPE_ARRAY_SHAPE_BIT) != 0)
+
+/* Get array shape from type */
+#define ZEND_ARRAY_SHAPE(t) \
+	((zend_array_shape *) (t).ptr)
+
 /* Compilation context that is different for each file, but shared between op arrays. */
 typedef struct _zend_file_context {
 	zend_declarables declarables;

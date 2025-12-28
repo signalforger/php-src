@@ -2814,6 +2814,12 @@ static zend_never_inline ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV_
 				HANDLE_EXCEPTION();
 			}
 		}
+		if (ZEND_TYPE_HAS_ARRAY_SHAPE(arg_info->type)) {
+			zend_array_shape *shape = ZEND_ARRAY_SHAPE(arg_info->type);
+			if (!zend_verify_array_arg_shape(opline->op1.num, op_1, shape)) {
+				HANDLE_EXCEPTION();
+			}
+		}
 	}
 
 	ZEND_VM_NEXT_OPCODE();
@@ -4352,6 +4358,13 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_R
 			SAVE_OPLINE();
 			zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
 			if (!zend_verify_array_arg_element_types(EX(func), arg_num, param, elem_type)) {
+				HANDLE_EXCEPTION();
+			}
+		}
+		if (ZEND_TYPE_HAS_ARRAY_SHAPE(arg_info->type)) {
+			SAVE_OPLINE();
+			zend_array_shape *shape = ZEND_ARRAY_SHAPE(arg_info->type);
+			if (!zend_verify_array_arg_shape(arg_num, param, shape)) {
 				HANDLE_EXCEPTION();
 			}
 		}
@@ -11168,6 +11181,16 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_
 				SAVE_OPLINE();
 				zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(ret_info->type);
 				if (!zend_verify_array_element_types(EX(func), retval_ptr, elem_type)) {
+
+
+					HANDLE_EXCEPTION();
+				}
+			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
 
 
 					HANDLE_EXCEPTION();
@@ -22158,6 +22181,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_VERIFY_RETURN
 					HANDLE_EXCEPTION();
 				}
 			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
+					zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+					HANDLE_EXCEPTION();
+				}
+			}
 			ZEND_VM_NEXT_OPCODE();
 		}
 
@@ -30809,6 +30841,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_VERIFY_RETURN
 					HANDLE_EXCEPTION();
 				}
 			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
+					zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+					HANDLE_EXCEPTION();
+				}
+			}
 			ZEND_VM_NEXT_OPCODE();
 		}
 
@@ -38812,6 +38853,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_VERIFY_RETURN
 				SAVE_OPLINE();
 				zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(ret_info->type);
 				if (!zend_verify_array_element_types(EX(func), retval_ptr, elem_type)) {
+
+
+					HANDLE_EXCEPTION();
+				}
+			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
 
 
 					HANDLE_EXCEPTION();
@@ -51967,6 +52018,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_VERIFY_RETURN
 					HANDLE_EXCEPTION();
 				}
 			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
+
+
+					HANDLE_EXCEPTION();
+				}
+			}
 			ZEND_VM_NEXT_OPCODE();
 		}
 
@@ -60088,6 +60149,13 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_RECV_S
 				HANDLE_EXCEPTION();
 			}
 		}
+		if (ZEND_TYPE_HAS_ARRAY_SHAPE(arg_info->type)) {
+			SAVE_OPLINE();
+			zend_array_shape *shape = ZEND_ARRAY_SHAPE(arg_info->type);
+			if (!zend_verify_array_arg_shape(arg_num, param, shape)) {
+				HANDLE_EXCEPTION();
+			}
+		}
 	}
 
 	ZEND_VM_NEXT_OPCODE();
@@ -66799,6 +66867,16 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_VERIF
 				SAVE_OPLINE();
 				zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(ret_info->type);
 				if (!zend_verify_array_element_types(EX(func), retval_ptr, elem_type)) {
+
+
+					HANDLE_EXCEPTION();
+				}
+			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
 
 
 					HANDLE_EXCEPTION();
@@ -77689,6 +77767,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_VERIFY_RETURN_TYPE
 					HANDLE_EXCEPTION();
 				}
 			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
+					zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+					HANDLE_EXCEPTION();
+				}
+			}
 			ZEND_VM_NEXT_OPCODE();
 		}
 
@@ -86340,6 +86427,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_VERIFY_RETURN_TYPE
 					HANDLE_EXCEPTION();
 				}
 			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
+					zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+					HANDLE_EXCEPTION();
+				}
+			}
 			ZEND_VM_NEXT_OPCODE();
 		}
 
@@ -94343,6 +94439,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_VERIFY_RETURN_TYPE
 				SAVE_OPLINE();
 				zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(ret_info->type);
 				if (!zend_verify_array_element_types(EX(func), retval_ptr, elem_type)) {
+
+
+					HANDLE_EXCEPTION();
+				}
+			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
 
 
 					HANDLE_EXCEPTION();
@@ -107396,6 +107502,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_VERIFY_RETURN_TYPE
 					HANDLE_EXCEPTION();
 				}
 			}
+			/* Check array shape if strict_arrays is enabled and we have array{...} type info */
+			if (EX_USES_STRICT_ARRAYS() && Z_TYPE_P(retval_ptr) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_SHAPE(ret_info->type)) {
+				SAVE_OPLINE();
+				zend_array_shape *shape = ZEND_ARRAY_SHAPE(ret_info->type);
+				if (!zend_verify_array_shape(EX(func), retval_ptr, shape)) {
+
+
+					HANDLE_EXCEPTION();
+				}
+			}
 			ZEND_VM_NEXT_OPCODE();
 		}
 
@@ -112372,6 +112488,12 @@ static zend_never_inline ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV_EX  z
 		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(arg_info->type)) {
 			zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(arg_info->type);
 			if (!zend_verify_array_arg_element_types(EX(func), opline->op1.num, op_1, elem_type)) {
+				HANDLE_EXCEPTION();
+			}
+		}
+		if (ZEND_TYPE_HAS_ARRAY_SHAPE(arg_info->type)) {
+			zend_array_shape *shape = ZEND_ARRAY_SHAPE(arg_info->type);
+			if (!zend_verify_array_arg_shape(opline->op1.num, op_1, shape)) {
 				HANDLE_EXCEPTION();
 			}
 		}
