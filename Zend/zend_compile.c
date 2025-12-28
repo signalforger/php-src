@@ -2751,7 +2751,8 @@ static void zend_emit_return_type_check(
 				return;
 			}
 			/* Escape analysis: if constant array elements all match the type, skip runtime check */
-			if (Z_TYPE(expr->u.constant) == IS_ARRAY) {
+			/* Note: Only apply escape analysis to array<T> types, not array shapes */
+			if (Z_TYPE(expr->u.constant) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_ELEMENT(type)) {
 				const zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(type);
 				if (elem_type) {
 					/* Try to verify at compile time (works for primitive types and unions of primitives) */
