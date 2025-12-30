@@ -1563,92 +1563,67 @@ static zend_always_inline const char *zend_find_invalid_key_type(
 	return "unknown";
 }
 
-/*
- * Optimized type-specialized validation functions
- * Key optimizations:
- * 1. Type check selected once outside loop (no switch per element)
- * 2. Minimal work in hot path (no index tracking, no type name assignment)
- * 3. ZEND_HASH_FOREACH_VAL instead of KEY_VAL when keys not needed
- * 4. Class entry cached for object types
- * 5. Fast path for packed arrays without references (4x loop unrolling)
- * 6. Prefetching for cache efficiency on large arrays
- */
-
-/* Fast path for packed arrays - processes 4 elements at a time */
-static zend_always_inline bool zend_verify_packed_array_elements_long(zval *data, uint32_t count)
-{
-	zval *end = data + count;
-	zval *prefetch_ptr;
-
-	/* Process 4 elements at a time */
-	while (data + 4 <= end) {
-		/* Prefetch next cache line */
-		prefetch_ptr = data + 8;
-		if (prefetch_ptr < end) {
-			__builtin_prefetch(prefetch_ptr, 0, 1);
-		}
-
-		/* Unrolled checks - compiler can pipeline these */
-		if (UNEXPECTED(Z_TYPE_P(data) != IS_LONG)) {
-			if (Z_TYPE_P(data) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		if (UNEXPECTED(Z_TYPE_P(data + 1) != IS_LONG)) {
-			if (Z_TYPE_P(data + 1) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		if (UNEXPECTED(Z_TYPE_P(data + 2) != IS_LONG)) {
-			if (Z_TYPE_P(data + 2) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		if (UNEXPECTED(Z_TYPE_P(data + 3) != IS_LONG)) {
-			if (Z_TYPE_P(data + 3) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		data += 4;
-	}
-
-	/* Handle remaining elements */
-	while (data < end) {
-		if (UNEXPECTED(Z_TYPE_P(data) != IS_LONG)) {
-			if (Z_TYPE_P(data) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		data++;
-	}
-	return true;
-
-slow_path:
-	/* Fall back to reference-aware path from current position */
-	while (data < end) {
-		zval *val = data;
-		if (Z_TYPE_P(val) == IS_REFERENCE) {
-			val = Z_REFVAL_P(val);
-		}
-		if (UNEXPECTED(Z_TYPE_P(val) != IS_LONG)) {
-			return false;
-		}
-		data++;
-	}
-	return true;
+/* Packed array validator with 4x unrolling and prefetching */
+#define DEFINE_VERIFY_PACKED_ELEMENTS(name, type_check) \
+static zend_always_inline bool name(zval *data, uint32_t count) \
+{ \
+	zval *end = data + count; \
+	while (data + 4 <= end) { \
+		if (data + 8 < end) __builtin_prefetch(data + 8, 0, 1); \
+		if (UNEXPECTED(!(type_check(data)))) { \
+			if (Z_TYPE_P(data) == IS_REFERENCE) goto slow_path; \
+			return false; \
+		} \
+		if (UNEXPECTED(!(type_check(data + 1)))) { \
+			if (Z_TYPE_P(data + 1) == IS_REFERENCE) goto slow_path; \
+			return false; \
+		} \
+		if (UNEXPECTED(!(type_check(data + 2)))) { \
+			if (Z_TYPE_P(data + 2) == IS_REFERENCE) goto slow_path; \
+			return false; \
+		} \
+		if (UNEXPECTED(!(type_check(data + 3)))) { \
+			if (Z_TYPE_P(data + 3) == IS_REFERENCE) goto slow_path; \
+			return false; \
+		} \
+		data += 4; \
+	} \
+	while (data < end) { \
+		if (UNEXPECTED(!(type_check(data)))) { \
+			if (Z_TYPE_P(data) == IS_REFERENCE) goto slow_path; \
+			return false; \
+		} \
+		data++; \
+	} \
+	return true; \
+slow_path: \
+	while (data < end) { \
+		zval *val = (Z_TYPE_P(data) == IS_REFERENCE) ? Z_REFVAL_P(data) : data; \
+		if (UNEXPECTED(!(type_check(val)))) return false; \
+		data++; \
+	} \
+	return true; \
 }
+
+#define IS_LONG_CHECK(v) (Z_TYPE_P(v) == IS_LONG)
+#define IS_STRING_CHECK(v) (Z_TYPE_P(v) == IS_STRING)
+
+DEFINE_VERIFY_PACKED_ELEMENTS(zend_verify_packed_array_elements_long, IS_LONG_CHECK)
+DEFINE_VERIFY_PACKED_ELEMENTS(zend_verify_packed_array_elements_string, IS_STRING_CHECK)
+
+#undef IS_LONG_CHECK
+#undef IS_STRING_CHECK
+#undef DEFINE_VERIFY_PACKED_ELEMENTS
 
 static zend_always_inline bool zend_verify_array_elements_long(HashTable *ht)
 {
-	/* Fast path for packed arrays */
 	if (HT_IS_PACKED(ht) && HT_IS_WITHOUT_HOLES(ht)) {
 		return zend_verify_packed_array_elements_long(ht->arPacked, ht->nNumOfElements);
 	}
-
-	/* Generic path for non-packed arrays */
 	zval *val;
 	ZEND_HASH_FOREACH_VAL(ht, val) {
-		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
-			val = Z_REFVAL_P(val);
-		}
-		if (UNEXPECTED(Z_TYPE_P(val) != IS_LONG)) {
-			return false;
-		}
+		ZVAL_DEREF(val);
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_LONG)) return false;
 	} ZEND_HASH_FOREACH_END();
 	return true;
 }
@@ -1657,67 +1632,9 @@ static zend_always_inline bool zend_verify_array_elements_double(HashTable *ht)
 {
 	zval *val;
 	ZEND_HASH_FOREACH_VAL(ht, val) {
-		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
-			val = Z_REFVAL_P(val);
-		}
-		if (UNEXPECTED(Z_TYPE_P(val) != IS_DOUBLE && Z_TYPE_P(val) != IS_LONG)) {
-			return false;
-		}
+		ZVAL_DEREF(val);
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_DOUBLE && Z_TYPE_P(val) != IS_LONG)) return false;
 	} ZEND_HASH_FOREACH_END();
-	return true;
-}
-
-/* Fast path for packed arrays - string validation */
-static zend_always_inline bool zend_verify_packed_array_elements_string(zval *data, uint32_t count)
-{
-	zval *end = data + count;
-	zval *prefetch_ptr;
-
-	while (data + 4 <= end) {
-		prefetch_ptr = data + 8;
-		if (prefetch_ptr < end) {
-			__builtin_prefetch(prefetch_ptr, 0, 1);
-		}
-
-		if (UNEXPECTED(Z_TYPE_P(data) != IS_STRING)) {
-			if (Z_TYPE_P(data) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		if (UNEXPECTED(Z_TYPE_P(data + 1) != IS_STRING)) {
-			if (Z_TYPE_P(data + 1) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		if (UNEXPECTED(Z_TYPE_P(data + 2) != IS_STRING)) {
-			if (Z_TYPE_P(data + 2) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		if (UNEXPECTED(Z_TYPE_P(data + 3) != IS_STRING)) {
-			if (Z_TYPE_P(data + 3) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		data += 4;
-	}
-
-	while (data < end) {
-		if (UNEXPECTED(Z_TYPE_P(data) != IS_STRING)) {
-			if (Z_TYPE_P(data) == IS_REFERENCE) goto slow_path;
-			return false;
-		}
-		data++;
-	}
-	return true;
-
-slow_path:
-	while (data < end) {
-		zval *val = data;
-		if (Z_TYPE_P(val) == IS_REFERENCE) {
-			val = Z_REFVAL_P(val);
-		}
-		if (UNEXPECTED(Z_TYPE_P(val) != IS_STRING)) {
-			return false;
-		}
-		data++;
-	}
 	return true;
 }
 
@@ -1726,15 +1643,10 @@ static zend_always_inline bool zend_verify_array_elements_string(HashTable *ht)
 	if (HT_IS_PACKED(ht) && HT_IS_WITHOUT_HOLES(ht)) {
 		return zend_verify_packed_array_elements_string(ht->arPacked, ht->nNumOfElements);
 	}
-
 	zval *val;
 	ZEND_HASH_FOREACH_VAL(ht, val) {
-		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
-			val = Z_REFVAL_P(val);
-		}
-		if (UNEXPECTED(Z_TYPE_P(val) != IS_STRING)) {
-			return false;
-		}
+		ZVAL_DEREF(val);
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_STRING)) return false;
 	} ZEND_HASH_FOREACH_END();
 	return true;
 }
@@ -1743,12 +1655,8 @@ static zend_always_inline bool zend_verify_array_elements_bool(HashTable *ht)
 {
 	zval *val;
 	ZEND_HASH_FOREACH_VAL(ht, val) {
-		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
-			val = Z_REFVAL_P(val);
-		}
-		if (UNEXPECTED(Z_TYPE_P(val) != IS_TRUE && Z_TYPE_P(val) != IS_FALSE)) {
-			return false;
-		}
+		ZVAL_DEREF(val);
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_TRUE && Z_TYPE_P(val) != IS_FALSE)) return false;
 	} ZEND_HASH_FOREACH_END();
 	return true;
 }
@@ -1872,77 +1780,47 @@ static zend_always_inline bool zend_verify_array_elements_union(HashTable *ht, c
 	return true;
 }
 
-/* Recursively validate a value against an array<T> type */
 static bool zend_verify_nested_array_type(zval *val, const zend_type *array_type)
 {
-	/* The value must be an array */
 	if (Z_TYPE_P(val) != IS_ARRAY) {
 		return false;
 	}
 
-	/* Get the inner element type */
 	const zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(*array_type);
 	if (!elem_type) {
-		return true; /* No element type constraint */
+		return true;
 	}
 
-	HashTable *ht = Z_ARRVAL_P(val);
 	zval *inner_val;
-
-	ZEND_HASH_FOREACH_VAL(ht, inner_val) {
-		/* Check if the inner element type is also a nested array<T> */
+	ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(val), inner_val) {
 		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(elem_type->element_type)) {
-			/* Recurse for deeper nesting */
 			if (!zend_verify_nested_array_type(inner_val, &elem_type->element_type)) {
 				return false;
 			}
-		} else {
-			/* Leaf level - use regular type checking */
-			if (!zend_check_type(&elem_type->element_type, inner_val, NULL, 0, 0)) {
-				return false;
-			}
+		} else if (!zend_check_type(&elem_type->element_type, inner_val, NULL, 0, 0)) {
+			return false;
 		}
 	} ZEND_HASH_FOREACH_END();
 
 	return true;
 }
 
-/* Check if a zend_type is a simple single type (for optimization) */
 static zend_always_inline uint8_t zend_get_simple_type_code(const zend_type *type)
 {
-	/* Check if it's a simple type without unions/intersections */
-	if (ZEND_TYPE_HAS_LIST(*type)) {
-		return 0; /* Union or intersection - not simple */
+	if (ZEND_TYPE_HAS_LIST(*type) ||
+	    ZEND_TYPE_HAS_ARRAY_ELEMENT(*type) ||
+	    (ZEND_TYPE_HAS_NAME(*type) && ZEND_TYPE_PURE_MASK(*type) != 0)) {
+		return 0;
 	}
 
 	uint32_t type_mask = ZEND_TYPE_PURE_MASK(*type);
 
-	/* If there's a class name AND other type bits, it's a union like int|MyClass */
-	if (ZEND_TYPE_HAS_NAME(*type) && type_mask != 0) {
-		return 0; /* Union of class + builtin type - not simple */
-	}
-
-	/* If it's a nested array<T> type, treat as complex for recursive validation */
-	if (ZEND_TYPE_HAS_ARRAY_ELEMENT(*type)) {
-		return 0; /* Nested array type - needs recursive validation */
-	}
-
-	/* Check for single built-in type */
 	if (type_mask == MAY_BE_LONG) return IS_LONG;
 	if (type_mask == MAY_BE_DOUBLE) return IS_DOUBLE;
 	if (type_mask == MAY_BE_STRING) return IS_STRING;
 	if (type_mask == MAY_BE_BOOL) return _IS_BOOL;
 	if (type_mask == MAY_BE_ARRAY) return IS_ARRAY;
-
-	/* Check for object type (with or without class name) */
-	if (type_mask == MAY_BE_OBJECT) {
-		return IS_OBJECT;
-	}
-
-	/* Check for class name only (no other type bits) */
-	if (ZEND_TYPE_HAS_NAME(*type)) {
-		return IS_OBJECT;
-	}
+	if (type_mask == MAY_BE_OBJECT || ZEND_TYPE_HAS_NAME(*type)) return IS_OBJECT;
 
 	return 0; /* Complex type */
 }
