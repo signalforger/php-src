@@ -38,6 +38,7 @@
 #include "zend_call_stack.h"
 #include "zend_frameless_function.h"
 #include "zend_property_hooks.h"
+#include "zend_smart_str.h"
 
 #define SET_NODE(target, src) do { \
 		target ## _type = (src)->op_type; \
@@ -1478,7 +1479,51 @@ zend_string *zend_type_to_string_resolved(const zend_type type, zend_class_entry
 		str = add_type_string(str, ZSTR_KNOWN(ZEND_STR_OBJECT), /* is_intersection */ false);
 	}
 	if (type_mask & MAY_BE_ARRAY) {
-		str = add_type_string(str, ZSTR_KNOWN(ZEND_STR_ARRAY), /* is_intersection */ false);
+		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(type)) {
+			zend_typed_array_element *elem = ZEND_TYPED_ARRAY_ELEMENT(type);
+			zend_string *elem_str = zend_type_to_string(elem->element_type);
+			if (ZEND_TYPED_ARRAY_HAS_KEY_TYPE(elem)) {
+				zend_string *key_str = zend_type_to_string(elem->key_type);
+				zend_string *array_str = zend_string_concat3(
+					"array<", 6, ZSTR_VAL(key_str), ZSTR_LEN(key_str), ", ", 2);
+				zend_string *full_str = zend_string_concat3(
+					ZSTR_VAL(array_str), ZSTR_LEN(array_str),
+					ZSTR_VAL(elem_str), ZSTR_LEN(elem_str), ">", 1);
+				zend_string_release(key_str);
+				zend_string_release(array_str);
+				zend_string_release(elem_str);
+				str = add_type_string(str, full_str, /* is_intersection */ false);
+				zend_string_release(full_str);
+			} else {
+				zend_string *array_str = zend_string_concat3(
+					"array<", 6, ZSTR_VAL(elem_str), ZSTR_LEN(elem_str), ">", 1);
+				zend_string_release(elem_str);
+				str = add_type_string(str, array_str, /* is_intersection */ false);
+				zend_string_release(array_str);
+			}
+		} else if (ZEND_TYPE_HAS_ARRAY_SHAPE(type)) {
+			zend_array_shape *shape = ZEND_ARRAY_SHAPE(type);
+			smart_str buf = {0};
+			smart_str_appends(&buf, "array{");
+			for (uint32_t i = 0; i < shape->num_elements; i++) {
+				if (i > 0) {
+					smart_str_appends(&buf, ", ");
+				}
+				zend_array_shape_element *elem = &shape->elements[i];
+				smart_str_append(&buf, elem->key);
+				if (elem->is_optional) {
+					smart_str_appendc(&buf, '?');
+				}
+				smart_str_appends(&buf, ": ");
+				zend_string *elem_type_str = zend_type_to_string(elem->type);
+				smart_str_append(&buf, elem_type_str);
+				zend_string_release(elem_type_str);
+			}
+			smart_str_appendc(&buf, '}');
+			str = add_type_string(str, smart_str_extract(&buf), /* is_intersection */ false);
+		} else {
+			str = add_type_string(str, ZSTR_KNOWN(ZEND_STR_ARRAY), /* is_intersection */ false);
+		}
 	}
 	if (type_mask & MAY_BE_STRING) {
 		str = add_type_string(str, ZSTR_KNOWN(ZEND_STR_STRING), /* is_intersection */ false);
