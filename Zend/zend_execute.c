@@ -1527,15 +1527,13 @@ static zend_always_inline bool zend_verify_array_key_types(
 	bool expects_int = (expected_key_mask == MAY_BE_LONG);
 
 	ZEND_HASH_FOREACH_KEY(ht, num_key, str_key) {
+		(void)num_key;
 		if (expects_int) {
 			if (str_key != NULL) {
-				return false;  /* Found string key when expecting int */
+				return false;
 			}
-		} else {
-			/* expects_string */
-			if (str_key == NULL) {
-				return false;  /* Found int key when expecting string */
-			}
+		} else if (str_key == NULL) {
+			return false;
 		}
 	} ZEND_HASH_FOREACH_END();
 
@@ -1552,6 +1550,7 @@ static zend_always_inline const char *zend_find_invalid_key_type(
 	bool expects_int = (expected_key_mask == MAY_BE_LONG);
 
 	ZEND_HASH_FOREACH_KEY(ht, num_key, str_key) {
+		(void)num_key;
 		if (expects_int && str_key != NULL) {
 			return "string";
 		}
@@ -1742,7 +1741,6 @@ static ZEND_COLD zend_long zend_find_invalid_array_element_union(
 	ZEND_HASH_FOREACH_KEY_VAL(ht, idx, key, val) {
 		zend_long current_idx = key ? numeric_idx : (zend_long)idx;
 
-		/* For nested array types, use recursive validation */
 		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(*element_type)) {
 			if (!zend_verify_nested_array_type(val, element_type)) {
 				*out_val = val;
@@ -1761,15 +1759,11 @@ static ZEND_COLD zend_long zend_find_invalid_array_element_union(
 	return -1;
 }
 
-/* Validate array elements against union/complex types */
 static zend_always_inline bool zend_verify_array_elements_union(HashTable *ht, const zend_type *element_type)
 {
 	zval *val;
-
 	ZEND_HASH_FOREACH_VAL(ht, val) {
-		/* Check if element type is a nested array<T> type */
 		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(*element_type)) {
-			/* Nested array type - need recursive validation */
 			if (!zend_verify_nested_array_type(val, element_type)) {
 				return false;
 			}

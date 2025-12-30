@@ -7203,13 +7203,10 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 
 		return (zend_type) ZEND_TYPE_INIT_CODE(ast->attr, 0, 0);
 	} else if (ast->kind == ZEND_AST_TYPE_ARRAY_OF) {
-		/* array<T> syntax - store element type info (supports unions, intersections) */
+		/* array<T> */
 		zend_ast *element_type_ast = ast->child[0];
 		zend_typed_array_element *elem_type = zend_arena_alloc(&CG(arena), sizeof(zend_typed_array_element));
-
-		/* Use zend_compile_typename to handle all type kinds including unions */
 		elem_type->element_type = zend_compile_typename(element_type_ast);
-		/* No key type constraint - initialize to empty */
 		elem_type->key_type = (zend_type) ZEND_TYPE_INIT_NONE(0);
 
 		zend_type type;
@@ -7217,16 +7214,13 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 		type.ptr = elem_type;
 		return type;
 	} else if (ast->kind == ZEND_AST_TYPE_ARRAY_MAP) {
-		/* array<K, V> syntax - store both key and value type info */
+		/* array<K, V> */
 		zend_ast *key_type_ast = ast->child[0];
 		zend_ast *value_type_ast = ast->child[1];
 		zend_typed_array_element *elem_type = zend_arena_alloc(&CG(arena), sizeof(zend_typed_array_element));
 
-		/* Compile key type - only int, string, or int|string allowed */
 		zend_type key_type = zend_compile_typename(key_type_ast);
 		uint32_t key_mask = ZEND_TYPE_PURE_MASK(key_type);
-
-		/* Validate key type - must be int, string, or int|string */
 		if (!ZEND_TYPE_IS_ONLY_MASK(key_type) ||
 		    (key_mask != MAY_BE_LONG && key_mask != MAY_BE_STRING &&
 		     key_mask != (MAY_BE_LONG | MAY_BE_STRING))) {
@@ -7242,17 +7236,15 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 		type.ptr = elem_type;
 		return type;
 	} else if (ast->kind == ZEND_AST_TYPE_ARRAY_SHAPE) {
-		/* array{key: type, key?: type, ...} syntax */
+		/* array{key: type, ...} */
 		zend_ast *element_list = ast->child[0];
 		uint32_t num_elements = element_list ? zend_ast_get_list(element_list)->children : 0;
 		uint32_t num_required = 0;
 
-		/* Allocate shape structure with flexible array member */
 		size_t shape_size = sizeof(zend_array_shape) + num_elements * sizeof(zend_array_shape_element);
 		zend_array_shape *shape = zend_arena_alloc(&CG(arena), shape_size);
 		shape->num_elements = num_elements;
 
-		/* Compile each shape element */
 		if (element_list) {
 			zend_ast_list *list = zend_ast_get_list(element_list);
 			for (uint32_t i = 0; i < num_elements; i++) {
