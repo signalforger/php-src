@@ -57,17 +57,20 @@ static HashTable *global_function_table = NULL;
 static HashTable *global_class_table = NULL;
 static HashTable *global_constants_table = NULL;
 static HashTable *global_auto_globals_table = NULL;
+static HashTable *global_shape_table = NULL;
 static HashTable *global_persistent_list = NULL;
 TSRMLS_MAIN_CACHE_DEFINE()
 # define GLOBAL_FUNCTION_TABLE		global_function_table
 # define GLOBAL_CLASS_TABLE			global_class_table
 # define GLOBAL_CONSTANTS_TABLE		global_constants_table
 # define GLOBAL_AUTO_GLOBALS_TABLE	global_auto_globals_table
+# define GLOBAL_SHAPE_TABLE			global_shape_table
 #else
 # define GLOBAL_FUNCTION_TABLE		CG(function_table)
 # define GLOBAL_CLASS_TABLE			CG(class_table)
 # define GLOBAL_AUTO_GLOBALS_TABLE	CG(auto_globals)
 # define GLOBAL_CONSTANTS_TABLE		EG(zend_constants)
+# define GLOBAL_SHAPE_TABLE			CG(shape_table)
 #endif
 
 ZEND_API zend_utility_values zend_uv;
@@ -724,6 +727,10 @@ static void compiler_globals_ctor(zend_compiler_globals *compiler_globals) /* {{
 	zend_hash_init(compiler_globals->class_table, 64, NULL, ZEND_CLASS_DTOR, 1);
 	zend_hash_copy(compiler_globals->class_table, global_class_table, zend_class_add_ref);
 
+	compiler_globals->shape_table = (HashTable *) malloc(sizeof(HashTable));
+	zend_hash_init(compiler_globals->shape_table, 32, NULL, zend_shape_dtor, 1);
+	zend_hash_copy(compiler_globals->shape_table, global_shape_table, NULL);
+
 	zend_set_default_compile_time_values();
 
 	compiler_globals->auto_globals = (HashTable *) malloc(sizeof(HashTable));
@@ -780,6 +787,10 @@ static void compiler_globals_dtor(zend_compiler_globals *compiler_globals) /* {{
 	if (compiler_globals->auto_globals != GLOBAL_AUTO_GLOBALS_TABLE) {
 		zend_hash_destroy(compiler_globals->auto_globals);
 		free(compiler_globals->auto_globals);
+	}
+	if (compiler_globals->shape_table != GLOBAL_SHAPE_TABLE) {
+		zend_hash_destroy(compiler_globals->shape_table);
+		free(compiler_globals->shape_table);
 	}
 	if (compiler_globals->script_encoding_list) {
 		pefree((char*)compiler_globals->script_encoding_list, 1);
@@ -914,6 +925,16 @@ static bool php_auto_globals_create_globals(zend_string *name) /* {{{ */
 }
 /* }}} */
 
+static void zend_shape_dtor(zval *zv) /* {{{ */
+{
+	zend_shape_entry *entry = Z_PTR_P(zv);
+	if (entry->name) {
+		zend_string_release(entry->name);
+	}
+	free(entry);
+}
+/* }}} */
+
 void zend_startup(zend_utility_functions *utility_functions) /* {{{ */
 {
 #ifdef ZTS
@@ -1008,11 +1029,13 @@ void zend_startup(zend_utility_functions *utility_functions) /* {{{ */
 	GLOBAL_CLASS_TABLE = (HashTable *) malloc(sizeof(HashTable));
 	GLOBAL_AUTO_GLOBALS_TABLE = (HashTable *) malloc(sizeof(HashTable));
 	GLOBAL_CONSTANTS_TABLE = (HashTable *) malloc(sizeof(HashTable));
+	GLOBAL_SHAPE_TABLE = (HashTable *) malloc(sizeof(HashTable));
 
 	zend_hash_init(GLOBAL_FUNCTION_TABLE, 1024, NULL, ZEND_FUNCTION_DTOR, 1);
 	zend_hash_init(GLOBAL_CLASS_TABLE, 64, NULL, ZEND_CLASS_DTOR, 1);
 	zend_hash_init(GLOBAL_AUTO_GLOBALS_TABLE, 8, NULL, auto_global_dtor, 1);
 	zend_hash_init(GLOBAL_CONSTANTS_TABLE, 128, NULL, ZEND_CONSTANT_DTOR, 1);
+	zend_hash_init(GLOBAL_SHAPE_TABLE, 32, NULL, zend_shape_dtor, 1);
 
 	zend_hash_init(&module_registry, 32, NULL, module_destructor_zval, 1);
 	zend_init_rsrc_list_dtors();
@@ -1029,9 +1052,11 @@ void zend_startup(zend_utility_functions *utility_functions) /* {{{ */
 	compiler_globals->in_compilation = 0;
 	compiler_globals->function_table = (HashTable *) malloc(sizeof(HashTable));
 	compiler_globals->class_table = (HashTable *) malloc(sizeof(HashTable));
+	compiler_globals->shape_table = (HashTable *) malloc(sizeof(HashTable));
 
 	*compiler_globals->function_table = *GLOBAL_FUNCTION_TABLE;
 	*compiler_globals->class_table = *GLOBAL_CLASS_TABLE;
+	*compiler_globals->shape_table = *GLOBAL_SHAPE_TABLE;
 	compiler_globals->auto_globals = GLOBAL_AUTO_GLOBALS_TABLE;
 
 	zend_hash_destroy(executor_globals->zend_constants);

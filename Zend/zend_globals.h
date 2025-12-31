@@ -94,6 +94,7 @@ struct _zend_compiler_globals {
 
 	HashTable *function_table;	/* function symbol table */
 	HashTable *class_table;		/* class table */
+	HashTable *shape_table;		/* shape type aliases */
 
 	HashTable *auto_globals;
 
@@ -191,6 +192,7 @@ struct _zend_executor_globals {
 	HashTable *function_table;	/* function symbol table */
 	HashTable *class_table;		/* class table */
 	HashTable *zend_constants;	/* constants table */
+	HashTable *shape_table;		/* shape type aliases */
 
 	zval          *vm_stack_top;
 	zval          *vm_stack_end;

@@ -14,6 +14,45 @@ function getUser(): array{id: int, name: string, email?: string} {
 }
 ```
 
+## Shape Type Aliases
+
+The `shape` keyword lets you define reusable type aliases for array structures:
+
+```php
+declare(strict_arrays=1);
+
+// Define a shape type alias
+shape User = array{id: int, name: string, email: string};
+
+// Use it like a type
+function getUser(int $id): User {
+    return ['id' => $id, 'name' => 'Alice', 'email' => 'alice@example.com'];
+}
+
+function processUser(User $user): void {
+    echo "Hello, {$user['name']}!";
+}
+
+// Check if a shape exists
+if (shape_exists('User')) {
+    echo "User shape is defined";
+}
+```
+
+Shapes can be autoloaded just like classes:
+
+```php
+spl_autoload_register(function($name) {
+    $file = __DIR__ . "/shapes/$name.php";
+    if (file_exists($file)) {
+        require_once $file;
+    }
+});
+
+// UserShape will be autoloaded from shapes/UserShape.php
+function getUser(): UserShape { ... }
+```
+
 ## Quick Reference
 
 ### Basic Syntax
@@ -93,6 +132,8 @@ interface ConfigProvider {
 | `08-reflection-api.php` | Runtime inspection with Reflection API |
 | `09-validation-and-errors.php` | Error handling and validation patterns |
 | `10-real-world-patterns.php` | Production-ready patterns and use cases |
+| `11-shape-type-aliases.php` | Defining reusable shapes with the `shape` keyword |
+| `12-shape-autoloading.php` | Autoloading shapes like classes |
 
 ## Running Examples
 
@@ -177,6 +218,72 @@ if ($returnType instanceof ReflectionArrayShapeType) {
         echo "\n";
     }
 }
+```
+
+## Shape Type Alias Details
+
+### Defining Shapes
+
+```php
+// Simple shape
+shape Point = array{x: int, y: int};
+
+// Shape with optional keys
+shape Config = array{debug: bool, env: string, cache_ttl?: int};
+
+// Shape with nullable values
+shape ApiResponse = array{success: bool, data: mixed, error: ?string};
+
+// Nested shapes (shapes can reference other shapes)
+shape Address = array{street: string, city: string, zip: string};
+shape Person = array{name: string, address: Address};
+
+// Shape with typed arrays
+shape Team = array{name: string, members: array<string>, scores: array<int>};
+```
+
+### Using Shapes
+
+```php
+// As return type
+function getUser(): User { ... }
+
+// As parameter type
+function processUser(User $user): void { ... }
+
+// In classes
+class UserRepository {
+    public function find(int $id): ?User { ... }
+    public function save(User $user): void { ... }
+}
+```
+
+### Shape Autoloading
+
+Shapes can be autoloaded using `spl_autoload_register()`:
+
+```php
+spl_autoload_register(function($name) {
+    $file = __DIR__ . "/shapes/$name.php";
+    if (file_exists($file)) {
+        require_once $file;
+    }
+});
+```
+
+### shape_exists() Function
+
+Check if a shape is defined:
+
+```php
+// Check without triggering autoload
+if (shape_exists('User', false)) { ... }
+
+// Check with autoloading (default)
+if (shape_exists('User')) { ... }
+
+// Case-insensitive
+shape_exists('user');  // Same as shape_exists('User')
 ```
 
 ## Common Patterns

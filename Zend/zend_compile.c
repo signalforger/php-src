@@ -404,6 +404,7 @@ void zend_file_context_begin(zend_file_context *prev_context) /* {{{ */
 	FC(imports) = NULL;
 	FC(imports_function) = NULL;
 	FC(imports_const) = NULL;
+	FC(shapes) = NULL;
 	FC(current_namespace) = NULL;
 	FC(in_namespace) = 0;
 	FC(has_bracketed_namespaces) = 0;
@@ -416,6 +417,11 @@ void zend_file_context_end(zend_file_context *prev_context) /* {{{ */
 {
 	zend_end_namespace();
 	zend_hash_destroy(&FC(seen_symbols));
+	if (FC(shapes)) {
+		zend_hash_destroy(FC(shapes));
+		efree(FC(shapes));
+		FC(shapes) = NULL;
+	}
 	CG(file_context) = *prev_context;
 }
 /* }}} */
@@ -7333,7 +7339,35 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 			}
 
 			return (zend_type) ZEND_TYPE_INIT_CODE(type_code, 0, 0);
-		} else {
+		}
+
+		/* Check if this is a shape type alias */
+		{
+			zend_string *resolved_name = zend_resolve_class_name_ast(ast);
+			zend_string *lcname = zend_string_tolower(resolved_name);
+			zend_shape_entry *shape = NULL;
+
+			/* First check file-local shapes */
+			if (FC(shapes)) {
+				shape = zend_hash_find_ptr(FC(shapes), lcname);
+			}
+			/* Then check global shape table */
+			if (!shape && CG(shape_table)) {
+				shape = zend_hash_find_ptr(CG(shape_table), lcname);
+			}
+
+			zend_string_release(lcname);
+			zend_string_release(resolved_name);
+
+			if (shape) {
+				return shape->type;
+			}
+			/* If not found, fall through to class handling.
+			 * The class type checking at runtime will check for shapes
+			 * before triggering class autoloading. */
+		}
+
+		{
 			const char *correct_name;
 			uint32_t fetch_type = zend_get_class_fetch_type_ast(ast);
 			zend_string *class_name = type_name;
@@ -9963,6 +9997,45 @@ static void zend_compile_const_decl(zend_ast *ast) /* {{{ */
 }
 /* }}}*/
 
+static void zend_compile_shape_decl(zend_ast *ast) /* {{{ */
+{
+	zend_ast *name_ast = ast->child[0];
+	zend_ast *type_ast = ast->child[1];
+	zend_string *name = zend_ast_get_str(name_ast);
+	zend_string *lcname;
+
+	/* Prefix with namespace if applicable */
+	name = zend_prefix_with_ns(name);
+	lcname = zend_string_tolower(name);
+
+	/* Check for duplicate shape definition in global table */
+	if (zend_hash_exists(CG(shape_table), lcname)) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Cannot redeclare shape %s", ZSTR_VAL(name));
+	}
+
+	/* Compile the type expression */
+	zend_type type = zend_compile_typename(type_ast);
+
+	/* Create and store the shape entry in global table */
+	zend_shape_entry *entry = pemalloc(sizeof(zend_shape_entry), 1);
+	entry->name = zend_string_copy(name);
+	entry->type = type;
+
+	zend_hash_add_ptr(CG(shape_table), lcname, entry);
+
+	/* Also add to file-local shapes for compile-time resolution */
+	if (!FC(shapes)) {
+		ALLOC_HASHTABLE(FC(shapes));
+		zend_hash_init(FC(shapes), 8, NULL, NULL, 0);  /* No dtor - just references */
+	}
+	zend_hash_add_ptr(FC(shapes), lcname, entry);
+
+	zend_string_release(lcname);
+	zend_string_release(name);
+}
+/* }}} */
+
 static void zend_compile_namespace(zend_ast *ast) /* {{{ */
 {
 	zend_ast *name_ast = ast->child[0];
@@ -12000,6 +12073,9 @@ static void zend_compile_stmt(zend_ast *ast) /* {{{ */
 			break;
 		case ZEND_AST_CONST_DECL:
 			zend_compile_const_decl(ast);
+			break;
+		case ZEND_AST_SHAPE_DECL:
+			zend_compile_shape_decl(ast);
 			break;
 		case ZEND_AST_NAMESPACE:
 			zend_compile_namespace(ast);

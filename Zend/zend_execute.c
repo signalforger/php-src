@@ -1117,6 +1117,9 @@ static zend_always_inline bool zend_value_instanceof_static(const zval *zv) {
 	return instanceof_function(Z_OBJCE_P(zv), called_scope);
 }
 
+/* Forward declaration - defined after zend_check_array_shape */
+static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_return_type);
+
 static zend_always_inline zend_class_entry *zend_fetch_ce_from_type(
 		const zend_type *type)
 {
@@ -1162,6 +1165,15 @@ static zend_always_inline bool zend_check_type_slow(
 		const zend_type *type, zval *arg, const zend_reference *ref,
 		bool is_return_type, bool is_internal)
 {
+	/* Check for shape types first (shapes accept arrays, not objects) */
+	if (ZEND_TYPE_IS_COMPLEX(*type) && Z_TYPE_P(arg) == IS_ARRAY) {
+		if (!ZEND_TYPE_HAS_LIST(*type) && ZEND_TYPE_HAS_NAME(*type)) {
+			if (zend_check_shape_type(type, arg, is_return_type)) {
+				return true;
+			}
+		}
+	}
+
 	if (ZEND_TYPE_IS_COMPLEX(*type) && EXPECTED(Z_TYPE_P(arg) == IS_OBJECT)) {
 		zend_class_entry *ce;
 		if (UNEXPECTED(ZEND_TYPE_HAS_LIST(*type))) {
@@ -2228,6 +2240,62 @@ ZEND_API bool zend_verify_array_arg_shape(
 		return false;
 	}
 	return true;
+}
+
+/* Check if a type name is actually a shape and validate accordingly */
+static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_return_type)
+{
+	(void)is_return_type; /* Reserved for future error messages */
+
+	if (!ZEND_TYPE_HAS_NAME(*type)) {
+		return false;
+	}
+
+	zend_string *name = ZEND_TYPE_NAME(*type);
+	zend_shape_entry *shape = zend_lookup_shape(name);
+
+	if (!shape) {
+		return false;  /* Not a shape, caller should try class */
+	}
+
+	/* It's a shape - validate the value against the shape's type */
+	if (Z_TYPE_P(arg) != IS_ARRAY) {
+		return false;  /* Shapes require arrays */
+	}
+
+	/* Use the shape's type for validation */
+	zend_type shape_type = shape->type;
+
+	/* Check if it's an array shape type */
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(shape_type)) {
+		zend_array_shape *shape_def = ZEND_ARRAY_SHAPE(shape_type);
+		const zend_array_shape_element *failed_elem;
+		zval *failed_val;
+		/* Validate the array against the shape definition */
+		zend_shape_check_result result = zend_check_array_shape(
+			Z_ARRVAL_P(arg), shape_def, &failed_elem, &failed_val);
+		return result == SHAPE_OK;
+	}
+
+	/* Check if it's a typed array */
+	if (ZEND_TYPE_HAS_ARRAY_ELEMENT(shape_type)) {
+		zend_typed_array_element *elem = ZEND_TYPED_ARRAY_ELEMENT(shape_type);
+		HashTable *ht = Z_ARRVAL_P(arg);
+		zval *val;
+		ZEND_HASH_FOREACH_VAL(ht, val) {
+			if (!ZEND_TYPE_CONTAINS_CODE(elem->element_type, Z_TYPE_P(val))) {
+				return false;
+			}
+		} ZEND_HASH_FOREACH_END();
+		return true;
+	}
+
+	/* For simple array type */
+	if (ZEND_TYPE_PURE_MASK(shape_type) & MAY_BE_ARRAY) {
+		return true;
+	}
+
+	return false;
 }
 
 ZEND_API ZEND_COLD void zend_verify_never_error(const zend_function *zf)

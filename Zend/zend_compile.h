@@ -148,6 +148,12 @@ typedef struct _zend_array_shape {
 	((zend_array_shape *) (t).ptr)
 
 /* Compilation context that is different for each file, but shared between op arrays. */
+/* Shape type alias entry */
+typedef struct _zend_shape_entry {
+	zend_string *name;
+	zend_type type;
+} zend_shape_entry;
+
 typedef struct _zend_file_context {
 	zend_declarables declarables;
 
@@ -158,6 +164,7 @@ typedef struct _zend_file_context {
 	HashTable *imports;
 	HashTable *imports_function;
 	HashTable *imports_const;
+	HashTable *shapes;  /* shape type aliases (name -> zend_shape_entry) */
 
 	HashTable seen_symbols;
 } zend_file_context;

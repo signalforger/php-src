@@ -159,6 +159,8 @@ typedef struct {
 #define _ZEND_TYPE_UNION_BIT (1u << 18)
 /* Whether the type is an array shape (array{key: type}) */
 #define _ZEND_TYPE_ARRAY_SHAPE_BIT (1u << 30)
+/* Whether the type is a shape name reference (to be resolved at runtime) */
+#define _ZEND_TYPE_SHAPE_NAME_BIT (1u << 29)
 /* Type mask for MAY_BE_* type bits only (bits 0-17, including IS_NEVER) */
 #define _ZEND_TYPE_MAY_BE_MASK ((1u << 18) - 1)
 /* Must have same value as MAY_BE_NULL */
@@ -195,6 +197,12 @@ typedef struct {
 
 #define ZEND_TYPE_HAS_ARRAY_ELEMENT(t) \
 	((((t).type_mask) & (1u << IS_ARRAY)) != 0 && (t).ptr != NULL && !ZEND_TYPE_IS_COMPLEX(t) && !((t).type_mask & _ZEND_TYPE_ARRAY_SHAPE_BIT))
+
+#define ZEND_TYPE_HAS_SHAPE_NAME(t) \
+	((((t).type_mask) & _ZEND_TYPE_SHAPE_NAME_BIT) != 0)
+
+#define ZEND_TYPE_SHAPE_NAME(t) \
+	((zend_string *) (t).ptr)
 
 #define ZEND_TYPE_IS_ONLY_MASK(t) \
 	(ZEND_TYPE_IS_SET(t) && (t).ptr == NULL)

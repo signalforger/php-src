@@ -7,12 +7,12 @@ abstract class space{
     abstract protected function unfold();
 }
 
-abstract class shape extends space{
+abstract class polygon extends space{
     private function x1() {}
     protected final function unfold(){}
 }
 
-abstract class quad extends shape{
+abstract class quad extends polygon{
     private function x2() {}
     function buggy(){
         $c = get_class($this);

@@ -16,73 +16,167 @@ blog to the most popular websites in the world. PHP is distributed under the
 
 ---
 
-## Array Shape Return Types (RFC Implementation)
+## Array Shapes RFC Implementation
 
-This fork implements **Array Shape Return Types** for PHP, allowing you to specify
-element types for array return values using the `array<T>` syntax.
+This fork implements **Array Shapes** for PHP, providing comprehensive type safety
+for array structures with three complementary syntaxes.
 
 ### Features
 
-- **Basic typed arrays**: `array<int>`, `array<string>`, `array<float>`, `array<bool>`
-- **Object typed arrays**: `array<MyClass>`, `array<DateTime>`
-- **Union types**: `array<int|string>`, `array<MyClass|OtherClass|int>`
-- **Nested arrays**: `array<array<int>>`, `array<array<array<string>>>` (up to 4 levels)
-- **Compile-time validation** for constant arrays (escape analysis optimization)
-- **Runtime validation** with detailed error messages
-
-### Usage
-
-Enable strict array checking with the `strict_arrays` declare:
+#### 1. Typed Arrays (`array<T>`)
+Define arrays where all elements must be of a specific type:
 
 ```php
-<?php
 declare(strict_arrays=1);
 
-// Basic typed array
 function getIds(): array<int> {
     return [1, 2, 3];
 }
 
-// Union types
-function getValues(): array<int|string> {
-    return [1, "two", 3];
-}
-
-// Object types
 function getUsers(): array<User> {
     return [new User("Alice"), new User("Bob")];
 }
+```
 
-// Nested arrays (matrix)
-function getMatrix(): array<array<int>> {
-    return [[1, 2], [3, 4], [5, 6]];
+#### 2. Key-Value Typed Arrays (`array<K, V>`)
+Define arrays with typed keys and values:
+
+```php
+declare(strict_arrays=1);
+
+function getScores(): array<string, int> {
+    return ['alice' => 95, 'bob' => 87];
 }
 
-// Mixed union with objects
-function getItems(): array<Product|Service|int> {
-    return [new Product(), 42, new Service()];
+function getConfig(): array<string, mixed> {
+    return ['debug' => true, 'port' => 8080];
 }
+```
+
+#### 3. Array Shapes (`array{key: type}`)
+Define the exact structure of associative arrays:
+
+```php
+declare(strict_arrays=1);
+
+function getUser(): array{id: int, name: string, email?: string} {
+    return ['id' => 1, 'name' => 'Alice'];
+}
+
+function getPoint(): array{x: int, y: int} {
+    return ['x' => 10, 'y' => 20];
+}
+```
+
+#### 4. Shape Type Aliases (`shape`)
+Define reusable type aliases for array structures:
+
+```php
+declare(strict_arrays=1);
+
+// Define shape type aliases
+shape User = array{id: int, name: string, email: string};
+shape Point = array{x: int, y: int};
+shape Config = array{debug: bool, env: string, cache_ttl?: int};
+
+// Use them in function signatures
+function getUser(int $id): User {
+    return ['id' => $id, 'name' => 'Alice', 'email' => 'alice@example.com'];
+}
+
+function processUser(User $user): void {
+    echo "Hello, {$user['name']}!";
+}
+
+function calculateDistance(Point $a, Point $b): float {
+    return sqrt(($b['x'] - $a['x']) ** 2 + ($b['y'] - $a['y']) ** 2);
+}
+```
+
+### Shape Autoloading
+
+Shapes can be autoloaded just like classes:
+
+```php
+// Register an autoloader
+spl_autoload_register(function($name) {
+    $file = __DIR__ . "/shapes/$name.php";
+    if (file_exists($file)) {
+        require_once $file;
+    }
+});
+
+// Check if a shape exists
+if (shape_exists('User')) {
+    echo "User shape is defined";
+}
+
+// Shapes will be autoloaded when used
+function getUser(): UserShape { ... }  // Autoloads shapes/UserShape.php
+```
+
+### Quick Reference
+
+```php
+// Typed arrays
+array<int>                     // All elements are int
+array<string>                  // All elements are string
+array<User>                    // All elements are User objects
+array<int|string>              // Elements are int or string
+array<array<int>>              // Nested: array of int arrays
+
+// Key-value typed arrays
+array<string, int>             // String keys, int values
+array<int, User>               // Int keys, User values
+
+// Array shapes (inline)
+array{id: int, name: string}   // Required keys
+array{id: int, email?: string} // Optional key (may be absent)
+array{data: ?string}           // Nullable value (can be null)
+array{user: array{id: int}}    // Nested shapes
+
+// Shape type aliases
+shape User = array{id: int, name: string};
+shape Point = array{x: int, y: int};
+shape Config = array{debug: bool, cache?: int};
 ```
 
 ### Error Handling
 
-When validation fails, a `TypeError` is thrown with details about the failing element:
+When validation fails, a `TypeError` is thrown with details:
 
 ```php
-function getInts(): array<int> {
-    return [1, "two", 3];  // TypeError: array element at index 1 is string
+function getIds(): array<int> {
+    return [1, "two", 3];  // TypeError: element at index 1 must be int, string given
+}
+
+function getUser(): array{id: int, name: string} {
+    return ['id' => 1];  // TypeError: missing required key 'name'
 }
 ```
 
 ### Implementation Status
 
-- [x] Parser support for `array<T>` syntax
-- [x] Single type validation (`array<int>`, `array<string>`, etc.)
-- [x] Object/class type validation (`array<MyClass>`)
-- [x] Union type support (`array<int|string|MyClass>`)
-- [x] Nested array support (`array<array<T>>`)
-- [x] Compile-time escape analysis optimization
-- [x] Runtime validation with error reporting
+- [x] Typed arrays: `array<T>`, `array<K, V>`
+- [x] Array shapes: `array{key: type}`
+- [x] Optional keys: `array{key?: type}`
+- [x] Nullable values: `array{key: ?type}`
+- [x] Union types: `array<int|string>`, `array{id: int|string}`
+- [x] Nested structures: `array<array<int>>`, `array{user: array{id: int}}`
+- [x] Shape type aliases: `shape Name = array{...}`
+- [x] Shape autoloading via `spl_autoload_register()`
+- [x] `shape_exists()` function
+- [x] Reflection API support
+- [x] Runtime validation with detailed errors
+
+### Examples
+
+See the `examples/array-shapes/` directory for comprehensive examples:
+
+```bash
+./sapi/cli/php examples/array-shapes/11-shape-type-aliases.php
+./sapi/cli/php examples/array-shapes/12-shape-autoloading.php
+```
 
 ---
 
