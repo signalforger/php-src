@@ -122,6 +122,8 @@ ZEND_API ZEND_COLD void zend_verify_array_prop_element_type_error(
 		const char *expected_type, const char *actual_type);
 ZEND_API bool zend_verify_array_prop_element_types(
 		const zend_property_info *info, zval *arr, const zend_typed_array_element *elem_type);
+ZEND_API bool zend_verify_array_prop_shape(
+		const zend_property_info *info, zval *arr, const zend_array_shape *shape);
 ZEND_API ZEND_COLD void zend_verify_array_key_type_error(
 		const zend_function *zf, const char *expected_key_type, const char *actual_key_type);
 ZEND_API ZEND_COLD void zend_verify_array_arg_key_type_error(

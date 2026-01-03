@@ -1094,8 +1094,8 @@ static zend_never_inline zval* zend_assign_to_typed_prop(const zend_property_inf
 		return &EG(uninitialized_zval);
 	}
 
-	/* Check array element types if strict_arrays is enabled */
-	if (EX_USES_STRICT_ARRAYS() && Z_TYPE(tmp) == IS_ARRAY) {
+	/* Check array element types for typed arrays/shapes */
+	if (Z_TYPE(tmp) == IS_ARRAY) {
 		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(info->type)) {
 			zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(info->type);
 			if (!zend_verify_array_prop_element_types(info, &tmp, elem_type)) {
