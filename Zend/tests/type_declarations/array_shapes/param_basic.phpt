@@ -2,7 +2,6 @@
 Array shape as parameter type - basic validation
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 function processPoint(array{x: int, y: int} $point): int {
     return $point['x'] + $point['y'];

@@ -2,7 +2,6 @@
 Array shape as parameter type - wrong value type
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 function processPoint(array{x: int, y: int} $point): int {
     return $point['x'] + $point['y'];
@@ -16,4 +15,4 @@ try {
 
 ?>
 --EXPECT--
-TypeError: Argument #1 key "y" must be of type int, string given
+TypeError: processPoint(): Argument #1 ($point) must be of type array{y: int, ...}, array key "y" is string

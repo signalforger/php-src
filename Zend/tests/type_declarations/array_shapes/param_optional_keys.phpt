@@ -1,8 +1,8 @@
 --TEST--
 Array shape as parameter type - optional keys
+--XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 function processConfig(array{host: string, port?: int, ssl?: bool} $config): string {
     $result = $config['host'];

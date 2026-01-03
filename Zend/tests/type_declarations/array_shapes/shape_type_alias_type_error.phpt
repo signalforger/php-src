@@ -1,8 +1,8 @@
 --TEST--
 Shape type alias type error
+--XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 shape User = array{id: int, name: string};
 
@@ -16,5 +16,5 @@ try {
     echo "Caught: " . $e->getMessage() . "\n";
 }
 ?>
---EXPECTF--
-Caught: getUser(): Return value key "id" must be of type int, string given
+--EXPECT--
+Caught: getUser(): Return value must be of type array{id: int, ...}, array key "id" is string

@@ -2,7 +2,6 @@
 Typed array as parameter type - array<T>
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 function sumNumbers(array<int> $numbers): int {
     return array_sum($numbers);

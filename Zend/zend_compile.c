@@ -7306,7 +7306,7 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 				zend_ast *elem_ast = list->child[i];
 				zend_ast *key_ast = elem_ast->child[0];
 				zend_ast *type_ast = elem_ast->child[1];
-				bool is_optional = (elem_ast->attr != 0);
+				bool is_optional = (elem_ast->attr & ZEND_SHAPE_ELEM_OPTIONAL_FLAG) != 0;
 
 				shape->elements[i].key = zend_string_copy(zend_ast_get_str(key_ast));
 				shape->elements[i].type = zend_compile_typename(type_ast);
@@ -10008,8 +10008,13 @@ static zend_type zend_persist_shape_type(zend_type type) /* {{{ */
 {
 	zend_type result = type;
 
+	/* Early return for unset types */
+	if (!ZEND_TYPE_IS_SET(type)) {
+		return result;
+	}
+
 	/* Handle array shape: copy structure to persistent memory */
-	if (ZEND_TYPE_HAS_ARRAY_SHAPE(type)) {
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(type) && type.ptr != NULL) {
 		zend_array_shape *arena_shape = ZEND_ARRAY_SHAPE(type);
 		size_t shape_size = sizeof(zend_array_shape)
 			+ arena_shape->num_elements * sizeof(zend_array_shape_element);
@@ -10050,7 +10055,7 @@ static zend_type zend_persist_shape_type(zend_type type) /* {{{ */
 	}
 
 	/* Handle class/type name: copy to persistent memory */
-	if (ZEND_TYPE_HAS_NAME(type)) {
+	if (ZEND_TYPE_HAS_NAME(type) && type.ptr != NULL) {
 		/* Use dup with persistent=1 since arena strings will be freed */
 		zend_string *persistent_name = zend_string_dup(ZEND_TYPE_NAME(type), 1);
 		ZEND_TYPE_SET_PTR(result, persistent_name);
@@ -10058,7 +10063,7 @@ static zend_type zend_persist_shape_type(zend_type type) /* {{{ */
 	}
 
 	/* Handle type lists (unions): copy list to persistent memory */
-	if (ZEND_TYPE_HAS_LIST(type)) {
+	if (ZEND_TYPE_HAS_LIST(type) && type.ptr != NULL) {
 		zend_type_list *arena_list = ZEND_TYPE_LIST(type);
 		size_t list_size = ZEND_TYPE_LIST_SIZE(arena_list->num_types);
 		zend_type_list *persistent_list = pemalloc(list_size, 1);
@@ -10113,7 +10118,7 @@ static void zend_compile_shape_decl(zend_ast *ast) /* {{{ */
 	/* Also add to file-local shapes for compile-time resolution */
 	if (!FC(shapes)) {
 		ALLOC_HASHTABLE(FC(shapes));
-		zend_hash_init(FC(shapes), 8, NULL, NULL, 0);  /* No dtor - just references */
+		zend_hash_init(FC(shapes), ZEND_SHAPE_DEFAULT_HASHTABLE_SIZE, NULL, NULL, 0);  /* No dtor - just references */
 	}
 	zend_hash_add_ptr(FC(shapes), lcname, entry);
 

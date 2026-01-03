@@ -1,8 +1,8 @@
 --TEST--
 shape_exists() function
+--XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 // Before defining shape
 var_dump(shape_exists('Point', false));

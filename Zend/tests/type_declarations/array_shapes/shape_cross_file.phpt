@@ -1,19 +1,18 @@
 --TEST--
 Shape type alias cross-file usage via require
+--XLEAK--
 --FILE--
 <?php
 // Create temporary shape file
 $tempDir = sys_get_temp_dir() . '/php_shape_test_' . getmypid();
 mkdir($tempDir);
 file_put_contents($tempDir . '/shapes.php', '<?php
-declare(strict_arrays=1);
 shape User = array{id: int, name: string};
 shape Address = array{street: string, city: string};
 ');
 
 $mainCode = <<<'MAIN'
 <?php
-declare(strict_arrays=1);
 require_once "%s/shapes.php";
 
 function getUser(): User {

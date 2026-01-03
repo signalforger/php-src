@@ -154,6 +154,39 @@ typedef struct _zend_shape_entry {
 	zend_type type;
 } zend_shape_entry;
 
+/* ============================================================================
+ * Typed Array & Array Shape Constants
+ * ============================================================================ */
+
+/* Maximum recursion depth for shape/typed array validation.
+ * Prevents infinite loops in case of circular shape references
+ * (e.g., shape A references shape B which references shape A).
+ * Similar to other PHP recursion limits like MAX_INCLUDE_DEPTH. */
+#define ZEND_SHAPE_MAX_RECURSION_DEPTH 64
+
+/* Default initial size for shape-related hash tables.
+ * Chosen as a power of 2 for efficient hashing, and 8 provides
+ * good balance between memory usage and resize frequency. */
+#define ZEND_SHAPE_DEFAULT_HASHTABLE_SIZE 8
+
+/* AST attribute flag indicating an optional shape element (key?: type).
+ * Used in zend_ast->attr during shape compilation. */
+#define ZEND_SHAPE_ELEM_OPTIONAL_FLAG 1
+
+/* Error result codes for shape validation */
+typedef enum {
+	SHAPE_OK = 0,           /* Validation passed */
+	SHAPE_MISSING_KEY = 1,  /* Required key is missing from array */
+	SHAPE_WRONG_TYPE = 2    /* Key exists but value has wrong type */
+} zend_shape_check_result;
+
+/* Error message format for shape type errors.
+ * Used consistently across return, argument, and property error messages. */
+#define ZEND_SHAPE_ERROR_FORMAT_MISSING_KEY \
+	"array{%s: %s, ...}, array given with missing key \"%s\""
+#define ZEND_SHAPE_ERROR_FORMAT_WRONG_TYPE \
+	"array{%s: %s, ...}, array key \"%s\" is %s"
+
 typedef struct _zend_file_context {
 	zend_declarables declarables;
 

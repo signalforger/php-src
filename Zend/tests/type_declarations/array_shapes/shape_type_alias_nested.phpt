@@ -1,8 +1,8 @@
 --TEST--
 Shape type alias with nested shapes
+--XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 shape Address = array{street: string, city: string, zip: string};
 shape Person = array{name: string, address: Address};

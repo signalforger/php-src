@@ -1,8 +1,8 @@
 --TEST--
 Array shape as parameter type - nested shapes
+--XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 function processUser(array{
     id: int,

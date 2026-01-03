@@ -2151,11 +2151,7 @@ ZEND_API bool zend_verify_array_prop_element_types(
 	return false;
 }
 
-typedef enum {
-	SHAPE_OK,
-	SHAPE_MISSING_KEY,
-	SHAPE_WRONG_TYPE
-} zend_shape_check_result;
+/* zend_shape_check_result enum is defined in zend_compile.h */
 
 static zend_always_inline zend_shape_check_result zend_check_array_shape(
 	HashTable *ht, const zend_array_shape *shape,
@@ -2299,10 +2295,7 @@ ZEND_API bool zend_verify_array_prop_shape(
 	return true;
 }
 
-/* Maximum recursion depth for shape validation to prevent infinite loops
- * in case of circular shape references (e.g., shape A references shape B
- * which references shape A). This is similar to other PHP recursion limits. */
-#define ZEND_SHAPE_MAX_RECURSION_DEPTH 64
+/* ZEND_SHAPE_MAX_RECURSION_DEPTH is defined in zend_compile.h */
 
 /* Thread-local recursion depth counter for shape validation */
 ZEND_TLS int zend_shape_recursion_depth = 0;
@@ -2341,7 +2334,7 @@ static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_retu
 	zend_type shape_type = shape->type;
 
 	/* Check if it's an array shape type */
-	if (ZEND_TYPE_HAS_ARRAY_SHAPE(shape_type)) {
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(shape_type) && shape_type.ptr != NULL) {
 		zend_array_shape *shape_def = ZEND_ARRAY_SHAPE(shape_type);
 		const zend_array_shape_element *failed_elem;
 		zval *failed_val;

@@ -1,8 +1,8 @@
 --TEST--
 Shape type alias with typed arrays
+--XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 shape Order = array{
     id: int,

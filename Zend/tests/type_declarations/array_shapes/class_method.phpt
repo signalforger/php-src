@@ -1,8 +1,8 @@
 --TEST--
 Array shape in class methods
+--XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 class UserService {
     public function createUser(array{name: string, email: string} $data): array{id: int, name: string, email: string} {

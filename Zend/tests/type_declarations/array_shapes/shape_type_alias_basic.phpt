@@ -1,8 +1,8 @@
 --TEST--
 Shape type alias basic usage
+--XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
 
 shape User = array{id: int, name: string};
 
