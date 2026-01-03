@@ -164,6 +164,11 @@ typedef struct _zend_shape_entry {
  * Similar to other PHP recursion limits like MAX_INCLUDE_DEPTH. */
 #define ZEND_SHAPE_MAX_RECURSION_DEPTH 64
 
+/* Maximum number of elements in a single array shape definition.
+ * Prevents excessive memory allocation from malformed AST.
+ * 255 is sufficient for any practical shape definition. */
+#define ZEND_SHAPE_MAX_ELEMENTS 255
+
 /* Default initial size for shape-related hash tables.
  * Chosen as a power of 2 for efficient hashing, and 8 provides
  * good balance between memory usage and resize frequency. */

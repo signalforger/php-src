@@ -1104,18 +1104,18 @@ typed_property:
 					variable_ptr = &EG(error_zval);
 					goto exit;
 				}
-				/* Check array element types for typed arrays */
+				/* Check array element types for typed arrays and array shapes */
 				if (Z_TYPE(tmp) == IS_ARRAY) {
 					if (ZEND_TYPE_HAS_ARRAY_ELEMENT(prop_info->type)) {
 						zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(prop_info->type);
-						if (!zend_verify_array_prop_element_types(prop_info, &tmp, elem_type)) {
+						if (UNEXPECTED(!zend_verify_array_prop_element_types(prop_info, &tmp, elem_type))) {
 							zval_ptr_dtor(&tmp);
 							variable_ptr = &EG(error_zval);
 							goto exit;
 						}
 					} else if (ZEND_TYPE_HAS_ARRAY_SHAPE(prop_info->type)) {
 						zend_array_shape *shape = ZEND_ARRAY_SHAPE(prop_info->type);
-						if (!zend_verify_array_prop_shape(prop_info, &tmp, shape)) {
+						if (UNEXPECTED(!zend_verify_array_prop_shape(prop_info, &tmp, shape))) {
 							zval_ptr_dtor(&tmp);
 							variable_ptr = &EG(error_zval);
 							goto exit;

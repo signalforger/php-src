@@ -7296,6 +7296,12 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 		uint32_t num_elements = element_list ? zend_ast_get_list(element_list)->children : 0;
 		uint32_t num_required = 0;
 
+		/* Validate element count to prevent excessive memory allocation */
+		if (UNEXPECTED(num_elements > ZEND_SHAPE_MAX_ELEMENTS)) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Array shape cannot have more than %d elements", ZEND_SHAPE_MAX_ELEMENTS);
+		}
+
 		size_t shape_size = sizeof(zend_array_shape) + num_elements * sizeof(zend_array_shape_element);
 		zend_array_shape *shape = zend_arena_alloc(&CG(arena), shape_size);
 		shape->num_elements = num_elements;

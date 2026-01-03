@@ -1098,13 +1098,13 @@ static zend_never_inline zval* zend_assign_to_typed_prop(const zend_property_inf
 	if (Z_TYPE(tmp) == IS_ARRAY) {
 		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(info->type)) {
 			zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(info->type);
-			if (!zend_verify_array_prop_element_types(info, &tmp, elem_type)) {
+			if (UNEXPECTED(!zend_verify_array_prop_element_types(info, &tmp, elem_type))) {
 				zval_ptr_dtor(&tmp);
 				return &EG(uninitialized_zval);
 			}
 		} else if (ZEND_TYPE_HAS_ARRAY_SHAPE(info->type)) {
 			zend_array_shape *shape = ZEND_ARRAY_SHAPE(info->type);
-			if (!zend_verify_array_prop_shape(info, &tmp, shape)) {
+			if (UNEXPECTED(!zend_verify_array_prop_shape(info, &tmp, shape))) {
 				zval_ptr_dtor(&tmp);
 				return &EG(uninitialized_zval);
 			}
@@ -2161,7 +2161,7 @@ static zend_always_inline zend_shape_check_result zend_check_array_shape(
 		const zend_array_shape_element *elem = &shape->elements[i];
 		zval *val = zend_hash_find(ht, elem->key);
 
-		if (val == NULL) {
+		if (UNEXPECTED(val == NULL)) {
 			if (!elem->is_optional) {
 				*failed_elem = elem;
 				*failed_val = NULL;
@@ -2170,7 +2170,7 @@ static zend_always_inline zend_shape_check_result zend_check_array_shape(
 			continue;
 		}
 
-		if (!zend_check_type(&elem->type, val, NULL, 0, false)) {
+		if (UNEXPECTED(!zend_check_type(&elem->type, val, NULL, 0, false))) {
 			*failed_elem = elem;
 			*failed_val = val;
 			return SHAPE_WRONG_TYPE;
