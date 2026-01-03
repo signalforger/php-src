@@ -3,7 +3,7 @@ Typed array: class method with typed array return and parameter
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class UserRepository {
     private array<array{id: int, name: string}> $users = [];

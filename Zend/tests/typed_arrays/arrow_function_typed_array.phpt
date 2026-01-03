@@ -2,7 +2,7 @@
 Arrow function: typed array in arrow function parameter and return type
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 $filter = fn(array<int> $nums): array<int> => array_filter($nums, fn($n) => $n > 2);
 

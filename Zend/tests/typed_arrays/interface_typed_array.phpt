@@ -3,7 +3,7 @@ Interface: typed array in interface method
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 interface Repository {
     public function findAll(): array<array{id: int, name: string}>;

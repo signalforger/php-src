@@ -2,7 +2,7 @@
 Closure: typed array in closure parameter and return type
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 $transform = function(array<int> $numbers): array<int> {
     return array_map(fn($n) => $n * 2, $numbers);

@@ -3,7 +3,7 @@ Array shape: mixed required and optional keys
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function createUser(
     array{

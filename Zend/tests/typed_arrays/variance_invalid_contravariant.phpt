@@ -3,7 +3,7 @@ Variance: valid contravariant parameter - child can accept more general type
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class Animal {}
 class Dog extends Animal {}

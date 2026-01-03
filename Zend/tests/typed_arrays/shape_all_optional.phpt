@@ -3,7 +3,7 @@ Array shape: all optional keys allows empty array
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getConfig(): array{timeout?: int, retries?: int, debug?: bool} {
     return [];

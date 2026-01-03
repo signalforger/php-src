@@ -2,7 +2,7 @@
 Constructor promoted property: typed array in promoted property
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class User {
     public function __construct(

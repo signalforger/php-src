@@ -3,7 +3,7 @@ Typed array: empty array is valid for any typed array
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getInts(): array<int> {
     return [];

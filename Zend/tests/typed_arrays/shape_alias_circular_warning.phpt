@@ -3,7 +3,7 @@ Shape alias: circular reference triggers warning
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 // Define shapes that reference each other creating a cycle
 // When validating, this should hit the recursion depth limit

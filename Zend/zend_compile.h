@@ -769,14 +769,12 @@ ZEND_STATIC_ASSERT(ZEND_MM_ALIGNED_SIZE(sizeof(zval)) == sizeof(zval),
 #define EX_USES_STRICT_TYPES() \
 	ZEND_CALL_USES_STRICT_TYPES(execute_data)
 
-#define ZEND_CALL_USES_STRICT_ARRAYS(call) \
-	(((call)->func->common.fn_flags & ZEND_ACC_STRICT_ARRAYS) != 0)
+/* Typed array checking is always enabled - no declare directive needed */
+#define ZEND_CALL_USES_STRICT_ARRAYS(call) (1)
 
-#define EX_USES_STRICT_ARRAYS() \
-	ZEND_CALL_USES_STRICT_ARRAYS(execute_data)
+#define EX_USES_STRICT_ARRAYS() (1)
 
-#define ZEND_RET_USES_STRICT_ARRAYS() \
-	ZEND_CALL_USES_STRICT_ARRAYS(EG(current_execute_data))
+#define ZEND_RET_USES_STRICT_ARRAYS() (1)
 
 #define ZEND_ARG_USES_STRICT_TYPES() \
 	(EG(current_execute_data)->prev_execute_data && \

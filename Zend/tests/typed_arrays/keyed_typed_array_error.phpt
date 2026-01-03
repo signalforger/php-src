@@ -2,7 +2,7 @@
 Typed array: array<string, int> key type error
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getCounts(): array<string, int> {
     return [

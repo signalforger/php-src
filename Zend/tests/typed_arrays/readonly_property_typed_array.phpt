@@ -2,7 +2,7 @@
 Readonly property: typed array in readonly property
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class ImmutableConfig {
     public function __construct(

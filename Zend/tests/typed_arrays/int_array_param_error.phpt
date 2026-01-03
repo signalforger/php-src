@@ -2,7 +2,7 @@
 Typed array: array<int> parameter type error
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function sumNumbers(array<int> $nums): int {
     return array_sum($nums);

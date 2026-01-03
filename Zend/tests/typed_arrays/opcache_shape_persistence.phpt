@@ -8,7 +8,7 @@ opcache.enable_cli=1
 opcache.jit=off
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 // This test verifies that typed arrays and shapes work correctly
 // when scripts are cached by OPcache

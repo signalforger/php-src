@@ -3,7 +3,7 @@ Edge case: array shape with named arguments
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function createUser(array{id: int, name: string, active?: bool} $data): void {
     echo "User: {$data['id']} - {$data['name']}";

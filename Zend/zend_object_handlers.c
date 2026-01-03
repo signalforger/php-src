@@ -1003,12 +1003,9 @@ static zend_always_inline bool property_uses_strict_types(void) {
 		&& ZEND_CALL_USES_STRICT_TYPES(EG(current_execute_data));
 }
 
+/* Typed array checking is always enabled */
 static zend_always_inline bool property_uses_strict_arrays(void) {
-	zend_execute_data *execute_data = EG(current_execute_data);
-	return execute_data
-		&& execute_data->func
-		&& ZEND_USER_CODE(execute_data->func->type)
-		&& (execute_data->func->op_array.fn_flags & ZEND_ACC_STRICT_ARRAYS);
+	return true;
 }
 
 static zval *forward_write_to_lazy_object(zend_object *zobj,

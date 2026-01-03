@@ -2,7 +2,7 @@
 Typed array: array<mixed> accepts any values
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function processAny(array<mixed> $items): void {
     foreach ($items as $item) {

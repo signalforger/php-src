@@ -2,7 +2,7 @@
 Typed array: array<int> type error when returning wrong type
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getNumbers(): array<int> {
     return [1, 2, "three", 4];

@@ -3,7 +3,7 @@ Array shape: deeply nested shapes work correctly
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getNestedData(): array{
     level1: array{

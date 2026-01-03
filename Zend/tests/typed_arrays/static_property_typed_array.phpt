@@ -2,7 +2,7 @@
 Static property: typed array in static class property
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class Registry {
     private static array<string> $items = [];

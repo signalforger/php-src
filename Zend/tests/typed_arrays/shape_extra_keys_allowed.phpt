@@ -3,7 +3,7 @@ Array shape: extra keys beyond defined shape are allowed
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function processUser(array{id: int, name: string} $user): void {
     echo "Processing: {$user['name']} (ID: {$user['id']})\n";

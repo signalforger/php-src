@@ -2,7 +2,7 @@
 Variance: contravariant parameter type - child can accept more general typed array
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class Animal {}
 class Dog extends Animal {}

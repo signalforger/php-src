@@ -3,7 +3,7 @@ Typed array: array<shape> combining typed arrays with shapes
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getUsers(): array<array{id: int, name: string}> {
     return [

@@ -2,7 +2,7 @@
 Variance: covariant return type - child can return more specific typed array
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class Animal {}
 class Dog extends Animal {}

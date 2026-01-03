@@ -2,7 +2,7 @@
 Typed array: property with array<int> type
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class Counter {
     public array<int> $counts = [];

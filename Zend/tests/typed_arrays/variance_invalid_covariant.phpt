@@ -3,7 +3,7 @@ Variance: valid covariant return - child can return more specific type
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class Animal {}
 class Dog extends Animal {}

@@ -3,7 +3,7 @@ Array shape: basic array{key: type} functionality
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getUser(): array{id: int, name: string, email: string} {
     return [

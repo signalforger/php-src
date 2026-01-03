@@ -2,7 +2,7 @@
 Typed array: nested array<array<int>> functionality
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getMatrix(): array<array<int>> {
     return [

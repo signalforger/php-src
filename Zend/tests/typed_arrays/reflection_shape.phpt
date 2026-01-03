@@ -3,7 +3,7 @@ Reflection: ReflectionType for array shapes
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getUser(): array{id: int, name: string} {
     return ['id' => 1, 'name' => 'Alice'];

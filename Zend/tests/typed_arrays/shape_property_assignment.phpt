@@ -3,7 +3,7 @@ Array shape: property assignment validation
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class Config {
     public array{host: string, port: int} $database;

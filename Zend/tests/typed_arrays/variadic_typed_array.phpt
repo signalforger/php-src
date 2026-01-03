@@ -2,7 +2,7 @@
 Edge case: variadic parameter with typed array
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function mergeArrays(array<int> ...$arrays): array<int> {
     $result = [];

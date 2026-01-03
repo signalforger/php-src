@@ -3,7 +3,7 @@ Shape alias: recursion depth limit prevents infinite loops
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 // This test verifies that the recursion depth limit (64) prevents
 // infinite loops when shapes reference themselves

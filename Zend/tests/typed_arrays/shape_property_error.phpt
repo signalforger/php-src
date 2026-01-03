@@ -3,7 +3,7 @@ Array shape: function return type error (shapes work for function returns)
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getConfig(): array{host: string, port: int} {
     return ['host' => 'localhost']; // Missing 'port'

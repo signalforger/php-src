@@ -3,7 +3,7 @@ Array shape: error when key has wrong type
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getUser(): array{id: int, name: string} {
     return [

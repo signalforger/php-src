@@ -3,7 +3,7 @@ Typed array: array<ClassName> type error with wrong object type
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 class User {
     public function __construct(public int $id) {}

@@ -2,7 +2,7 @@
 Abstract class: typed array in abstract method
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 abstract class DataStore {
     abstract public function getItems(): array<string>;

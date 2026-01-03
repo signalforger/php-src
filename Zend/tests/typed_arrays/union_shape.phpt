@@ -3,7 +3,7 @@ Union types: array shape in union with null
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function findUser(int $id): array{id: int, name: string}|null {
     if ($id === 1) {

@@ -3,7 +3,7 @@ Array shape: error when required key is missing
 --XLEAK--
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 function getUser(): array{id: int, name: string} {
     return [

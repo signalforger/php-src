@@ -2,7 +2,7 @@
 Trait: typed array in trait method
 --FILE--
 <?php
-declare(strict_arrays=1);
+
 
 trait Taggable {
     private array<string> $tags = [];
