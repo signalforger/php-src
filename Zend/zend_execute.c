@@ -2000,7 +2000,7 @@ static ZEND_COLD zend_long zend_find_invalid_array_element_union(
 }
 
 /* Thread-local recursion depth counter for nested array validation */
-static ZEND_TLS int zend_typed_array_recursion_depth = 0;
+ZEND_TLS int zend_typed_array_recursion_depth = 0;
 
 static zend_always_inline bool zend_verify_array_elements_union(HashTable *ht, const zend_type *element_type)
 {
@@ -2079,8 +2079,8 @@ static zend_always_inline uint8_t zend_get_simple_type_code(const zend_type *typ
  * Caches the last looked up class name and its corresponding class entry.
  * This avoids repeated zend_lookup_class() calls for the same class type.
  */
-static ZEND_TLS zend_string *zend_cached_class_name = NULL;
-static ZEND_TLS zend_class_entry *zend_cached_class_entry = NULL;
+ZEND_TLS zend_string *zend_cached_class_name = NULL;
+ZEND_TLS zend_class_entry *zend_cached_class_entry = NULL;
 
 static zend_always_inline zend_class_entry *zend_lookup_class_cached(zend_string *class_name)
 {
