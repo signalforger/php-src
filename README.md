@@ -16,143 +16,233 @@ blog to the most popular websites in the world. PHP is distributed under the
 
 ---
 
-## Array Shapes RFC Implementation
+## Typed Arrays & Array Shapes RFC Implementation
 
-This fork implements **Array Shapes** for PHP, providing comprehensive type safety
-for array structures with three complementary syntaxes.
+This fork implements **Typed Arrays** and **Array Shapes** for PHP—two complementary features that bring type safety to PHP's most versatile data structure.
 
-### Features
+### The Problem
 
-#### 1. Typed Arrays (`array<T>`)
-Define arrays where all elements must be of a specific type:
+PHP arrays are incredibly flexible, serving as lists, dictionaries, and structured records. But this flexibility comes at a cost: no way to express or enforce what an array should contain.
 
 ```php
-declare(strict_arrays=1);
+function getUsers(): array {
+    // What's in this array? Objects? Associative arrays? Integers?
+    // The type system can't tell you.
+}
+```
 
+### The Solution: Two Complementary Features
+
+#### Typed Arrays — For Collections
+
+When you have a **list of things of the same type**, use typed arrays:
+
+```php
+// A list of integers
 function getIds(): array<int> {
     return [1, 2, 3];
 }
 
-function getUsers(): array<User> {
-    return [new User("Alice"), new User("Bob")];
+// A list of User objects
+function getActiveUsers(): array<User> {
+    return $this->repository->findActive();
 }
-```
 
-#### 2. Key-Value Typed Arrays (`array<K, V>`)
-Define arrays with typed keys and values:
-
-```php
-declare(strict_arrays=1);
-
+// A dictionary with string keys and integer values
 function getScores(): array<string, int> {
-    return ['alice' => 95, 'bob' => 87];
-}
-
-function getConfig(): array<string, mixed> {
-    return ['debug' => true, 'port' => 8080];
+    return ['alice' => 95, 'bob' => 87, 'charlie' => 92];
 }
 ```
 
-#### 3. Array Shapes (`array{key: type}`)
-Define the exact structure of associative arrays:
+This is what you reach for when working with collections—arrays where every element is the same kind of thing.
+
+#### Array Shapes — For Structured Data
+
+When you have **structured data with known keys**, like records from a database or responses from an API, use array shapes:
 
 ```php
-declare(strict_arrays=1);
-
-function getUser(): array{id: int, name: string, email?: string} {
-    return ['id' => 1, 'name' => 'Alice'];
+// Data from a database row
+function getUser(int $id): array{id: int, name: string, email: string} {
+    return $this->db->fetch("SELECT id, name, email FROM users WHERE id = ?", $id);
 }
 
-function getPoint(): array{x: int, y: int} {
-    return ['x' => 10, 'y' => 20];
+// Response from an external API
+function getWeather(string $city): array{temp: float, humidity: int, conditions: string} {
+    return json_decode(file_get_contents("https://api.weather.com/$city"), true);
 }
 ```
 
-#### 4. Shape Type Aliases (`shape`)
-Define reusable type aliases for array structures:
+### Real-World Examples
+
+#### Working with Database Results
 
 ```php
-declare(strict_arrays=1);
+// Define the shape of a user record
+shape UserRecord = array{
+    id: int,
+    name: string,
+    email: string,
+    created_at: string,
+    is_active?: bool
+};
 
-// Define shape type aliases
-shape User = array{id: int, name: string, email: string};
-shape Point = array{x: int, y: int};
-shape Config = array{debug: bool, env: string, cache_ttl?: int};
-
-// Use them in function signatures
-function getUser(int $id): User {
-    return ['id' => $id, 'name' => 'Alice', 'email' => 'alice@example.com'];
-}
-
-function processUser(User $user): void {
-    echo "Hello, {$user['name']}!";
-}
-
-function calculateDistance(Point $a, Point $b): float {
-    return sqrt(($b['x'] - $a['x']) ** 2 + ($b['y'] - $a['y']) ** 2);
-}
-```
-
-### Shape Autoloading
-
-Shapes can be autoloaded just like classes:
-
-```php
-// Register an autoloader
-spl_autoload_register(function($name) {
-    $file = __DIR__ . "/shapes/$name.php";
-    if (file_exists($file)) {
-        require_once $file;
+class UserRepository {
+    // Single record
+    public function find(int $id): ?UserRecord {
+        return $this->db->fetch("SELECT * FROM users WHERE id = ?", $id);
     }
-});
 
-// Check if a shape exists
-if (shape_exists('User')) {
-    echo "User shape is defined";
+    // Collection of records — combining both features!
+    public function findAll(): array<UserRecord> {
+        return $this->db->fetchAll("SELECT * FROM users");
+    }
+}
+```
+
+#### Working with API Responses
+
+```php
+// Shape describing the API response structure
+shape ApiResponse = array{
+    success: bool,
+    data: mixed,
+    error?: string,
+    meta?: array{page: int, total: int}
+};
+
+shape ProductData = array{
+    id: int,
+    name: string,
+    price: float,
+    tags: array<string>     // Nested typed array!
+};
+
+function fetchProduct(int $id): ProductData {
+    $response = $this->http->get("/api/products/$id");
+    return $response['data'];
 }
 
-// Shapes will be autoloaded when used
-function getUser(): UserShape { ... }  // Autoloads shapes/UserShape.php
+function fetchProducts(): array<ProductData> {
+    $response = $this->http->get("/api/products");
+    return $response['data'];
+}
+```
+
+#### Configuration Arrays
+
+```php
+shape DatabaseConfig = array{
+    host: string,
+    port: int,
+    database: string,
+    username: string,
+    password: string,
+    options?: array<string, mixed>
+};
+
+shape AppConfig = array{
+    debug: bool,
+    env: string,
+    database: DatabaseConfig,
+    cache_ttl?: int
+};
+
+function loadConfig(string $path): AppConfig {
+    return require $path;
+}
+```
+
+### This is NOT About DTOs
+
+A common misconception: "Why not just use classes/DTOs?"
+
+**These features work with arrays, not objects.** They're designed for the many situations where arrays are the right tool:
+
+- **Database results** — PDO and other drivers return arrays
+- **JSON APIs** — `json_decode()` returns arrays
+- **Configuration files** — Often loaded as arrays
+- **Legacy code** — Millions of lines of PHP use arrays for structured data
+- **Interoperability** — Arrays are PHP's universal data interchange format
+
+You don't have to choose between arrays and objects. Use objects when you need behavior (methods), use typed arrays when you're working with data.
+
+```php
+// Arrays for data from external sources
+function getApiUser(): array{id: int, name: string} {
+    return json_decode($response, true);
+}
+
+// Objects when you need behavior
+class User {
+    public function __construct(
+        public int $id,
+        public string $name
+    ) {}
+
+    public function greet(): string {
+        return "Hello, {$this->name}!";
+    }
+}
 ```
 
 ### Quick Reference
 
 ```php
-// Typed arrays
-array<int>                     // All elements are int
-array<string>                  // All elements are string
-array<User>                    // All elements are User objects
-array<int|string>              // Elements are int or string
-array<array<int>>              // Nested: array of int arrays
+// Typed arrays — for collections
+array<int>                     // List of integers
+array<string>                  // List of strings
+array<User>                    // List of User objects
+array<int|string>              // List of integers or strings
+array<string, int>             // Dictionary: string keys, int values
+array<array<int>>              // List of integer lists
 
-// Key-value typed arrays
-array<string, int>             // String keys, int values
-array<int, User>               // Int keys, User values
-
-// Array shapes (inline)
+// Array shapes — for structured data
 array{id: int, name: string}   // Required keys
 array{id: int, email?: string} // Optional key (may be absent)
 array{data: ?string}           // Nullable value (can be null)
 array{user: array{id: int}}    // Nested shapes
 
-// Shape type aliases
+// Shape type aliases — for reusability
 shape User = array{id: int, name: string};
 shape Point = array{x: int, y: int};
 shape Config = array{debug: bool, cache?: int};
 ```
 
-### Error Handling
+### Error Messages
 
-When validation fails, a `TypeError` is thrown with details:
+When validation fails, you get clear error messages:
 
 ```php
 function getIds(): array<int> {
-    return [1, "two", 3];  // TypeError: element at index 1 must be int, string given
+    return [1, "two", 3];
 }
+// TypeError: getIds(): Return value must be of type array<int>,
+//            array element at index 1 is string
 
 function getUser(): array{id: int, name: string} {
-    return ['id' => 1];  // TypeError: missing required key 'name'
+    return ['id' => 1];
 }
+// TypeError: getUser(): Return value must be of type array{name: string, ...},
+//            array given with missing key "name"
+```
+
+### Shape Autoloading
+
+Shapes can be autoloaded like classes, keeping your codebase organized:
+
+```php
+// shapes/UserRecord.php
+<?php
+shape UserRecord = array{id: int, name: string, email: string};
+
+// Somewhere else in your code
+spl_autoload_register(function($name) {
+    $file = __DIR__ . "/shapes/$name.php";
+    if (file_exists($file)) require_once $file;
+});
+
+// UserRecord is autoloaded when first used
+function getUser(): UserRecord { ... }
 ```
 
 ### Implementation Status
@@ -161,22 +251,12 @@ function getUser(): array{id: int, name: string} {
 - [x] Array shapes: `array{key: type}`
 - [x] Optional keys: `array{key?: type}`
 - [x] Nullable values: `array{key: ?type}`
-- [x] Union types: `array<int|string>`, `array{id: int|string}`
+- [x] Union types: `array<int|string>`
 - [x] Nested structures: `array<array<int>>`, `array{user: array{id: int}}`
 - [x] Shape type aliases: `shape Name = array{...}`
 - [x] Shape autoloading via `spl_autoload_register()`
-- [x] `shape_exists()` function
-- [x] Reflection API support
-- [x] Runtime validation with detailed errors
-
-### Examples
-
-See the `examples/array-shapes/` directory for comprehensive examples:
-
-```bash
-./sapi/cli/php examples/array-shapes/11-shape-type-aliases.php
-./sapi/cli/php examples/array-shapes/12-shape-autoloading.php
-```
+- [x] Reflection API support (`ReflectionArrayType`, `ReflectionArrayShapeType`)
+- [x] Runtime validation with detailed error messages
 
 ---
 
