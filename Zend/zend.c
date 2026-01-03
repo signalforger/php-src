@@ -925,13 +925,51 @@ static bool php_auto_globals_create_globals(zend_string *name) /* {{{ */
 }
 /* }}} */
 
+static void zend_shape_type_free(zend_type type) /* {{{ */
+{
+	/* Free array shape structure and its elements */
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(type)) {
+		zend_array_shape *shape = ZEND_ARRAY_SHAPE(type);
+		for (uint32_t i = 0; i < shape->num_elements; i++) {
+			if (shape->elements[i].key) {
+				zend_string_release(shape->elements[i].key);
+			}
+			/* Recursively free element types */
+			zend_shape_type_free(shape->elements[i].type);
+		}
+		pefree(shape, 1);
+	} else if ((type.type_mask & (1u << IS_ARRAY)) && type.ptr != NULL
+			&& !ZEND_TYPE_IS_COMPLEX(type)) {
+		/* Free typed array element structure */
+		zend_typed_array_element *elem = ZEND_TYPED_ARRAY_ELEMENT(type);
+		zend_shape_type_free(elem->element_type);
+		if (ZEND_TYPE_IS_SET(elem->key_type)) {
+			zend_shape_type_free(elem->key_type);
+		}
+		pefree(elem, 1);
+	} else if (ZEND_TYPE_HAS_NAME(type)) {
+		/* Free type name if present */
+		zend_string_release(ZEND_TYPE_NAME(type));
+	} else if (ZEND_TYPE_HAS_LIST(type)) {
+		/* Handle type lists (unions) */
+		zend_type *list_type;
+		ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(type), list_type) {
+			zend_shape_type_free(*list_type);
+		} ZEND_TYPE_LIST_FOREACH_END();
+		pefree(ZEND_TYPE_LIST(type), 1);
+	}
+}
+/* }}} */
+
 static void zend_shape_dtor(zval *zv) /* {{{ */
 {
 	zend_shape_entry *entry = Z_PTR_P(zv);
 	if (entry->name) {
 		zend_string_release(entry->name);
 	}
-	free(entry);
+	/* Free the type data (allocated with pemalloc) */
+	zend_shape_type_free(entry->type);
+	pefree(entry, 1);
 }
 /* }}} */
 

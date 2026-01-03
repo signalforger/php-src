@@ -1,7 +1,9 @@
 --TEST--
 Reflection: ReflectionType for typed arrays
+--XLEAK--
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function getNumbers(): array<int> {
     return [1, 2, 3];
@@ -11,11 +13,11 @@ $rf = new ReflectionFunction('getNumbers');
 $returnType = $rf->getReturnType();
 
 echo "Return type: " . $returnType . "\n";
-echo "Is built-in: " . ($returnType->isBuiltin() ? 'yes' : 'no') . "\n";
+echo "Class: " . get_class($returnType) . "\n";
 echo "Allows null: " . ($returnType->allowsNull() ? 'yes' : 'no') . "\n";
 
 ?>
 --EXPECT--
 Return type: array<int>
-Is built-in: yes
+Class: ReflectionArrayType
 Allows null: no

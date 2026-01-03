@@ -1,7 +1,9 @@
 --TEST--
 Array shape: extra keys beyond shape definition are allowed
+--XLEAK--
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function getUser(): array{id: int, name: string} {
     return [

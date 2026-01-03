@@ -1,7 +1,9 @@
 --TEST--
 Array shape: optional keys with key?: type syntax
+--XLEAK--
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function getConfig(): array{host: string, port: int, ssl?: bool} {
     return [

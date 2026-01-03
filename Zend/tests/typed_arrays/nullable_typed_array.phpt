@@ -2,6 +2,7 @@
 Typed array: nullable array<int>|null
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function maybeGetNumbers(): ?array<int> {
     return null;

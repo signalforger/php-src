@@ -2,6 +2,7 @@
 Typed array: array<float> functionality
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function getPrices(): array<float> {
     return [19.99, 29.99, 39.99];

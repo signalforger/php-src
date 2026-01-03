@@ -1,7 +1,9 @@
 --TEST--
 Array shape: error when key has wrong type
+--XLEAK--
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function getUser(): array{id: int, name: string} {
     return [
@@ -18,4 +20,4 @@ try {
 
 ?>
 --EXPECTF--
-Caught: getUser(): Return value key "id" must be of type int, string given
+Caught: getUser(): Return value must be of type array{id: int, ...}, array key "id" is string

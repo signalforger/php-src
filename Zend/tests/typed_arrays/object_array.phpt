@@ -2,6 +2,7 @@
 Typed array: array<ClassName> with objects
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 class User {
     public function __construct(

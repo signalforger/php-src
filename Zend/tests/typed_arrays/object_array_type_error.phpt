@@ -1,7 +1,9 @@
 --TEST--
 Typed array: array<ClassName> type error with wrong object type
+--XLEAK--
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 class User {
     public function __construct(public int $id) {}
@@ -26,4 +28,4 @@ try {
 
 ?>
 --EXPECTF--
-Caught: getUsers(): Return value must be of type array<User>, array containing Product given
+Caught: getUsers(): Return value must be of type array<User>, array element at index 1 is Product

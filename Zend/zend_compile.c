@@ -2806,8 +2806,12 @@ static void zend_emit_return_type_check(
 			if (Z_TYPE(expr->u.constant) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_ELEMENT(type)) {
 				const zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(type);
 				if (elem_type) {
-					/* Try to verify at compile time (works for primitive types and unions of primitives) */
-					if (zend_const_array_elements_match_type(&expr->u.constant, &elem_type->element_type)) {
+					/* If there's a key type constraint, we can't skip runtime check
+					 * (compile-time key type validation would need additional implementation) */
+					if (ZEND_TYPED_ARRAY_HAS_KEY_TYPE(elem_type)) {
+						/* Fall through to emit runtime check */
+					} else if (zend_const_array_elements_match_type(&expr->u.constant, &elem_type->element_type)) {
+						/* Try to verify at compile time (works for primitive types and unions of primitives) */
 						return; /* All elements match - no runtime check needed */
 					}
 				}
@@ -9997,6 +10001,84 @@ static void zend_compile_const_decl(zend_ast *ast) /* {{{ */
 }
 /* }}}*/
 
+/* Copy type data to persistent memory for shape storage.
+ * This is needed because zend_compile_typename uses arena allocation,
+ * but shapes are stored in a persistent table that survives across requests. */
+static zend_type zend_persist_shape_type(zend_type type) /* {{{ */
+{
+	zend_type result = type;
+
+	/* Handle array shape: copy structure to persistent memory */
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(type)) {
+		zend_array_shape *arena_shape = ZEND_ARRAY_SHAPE(type);
+		size_t shape_size = sizeof(zend_array_shape)
+			+ arena_shape->num_elements * sizeof(zend_array_shape_element);
+
+		zend_array_shape *persistent_shape = pemalloc(shape_size, 1);
+		memcpy(persistent_shape, arena_shape, shape_size);
+
+		/* Persist each element's key and type */
+		for (uint32_t i = 0; i < persistent_shape->num_elements; i++) {
+			if (persistent_shape->elements[i].key) {
+				/* Use dup with persistent=1 since arena strings will be freed */
+				persistent_shape->elements[i].key =
+					zend_string_dup(persistent_shape->elements[i].key, 1);
+			}
+			persistent_shape->elements[i].type =
+				zend_persist_shape_type(persistent_shape->elements[i].type);
+		}
+
+		result.ptr = persistent_shape;
+		return result;
+	}
+
+	/* Handle typed array: copy element structure to persistent memory */
+	if ((type.type_mask & (1u << IS_ARRAY)) && type.ptr != NULL
+			&& !ZEND_TYPE_IS_COMPLEX(type)) {
+		zend_typed_array_element *arena_elem = ZEND_TYPED_ARRAY_ELEMENT(type);
+		zend_typed_array_element *persistent_elem = pemalloc(sizeof(zend_typed_array_element), 1);
+
+		persistent_elem->element_type = zend_persist_shape_type(arena_elem->element_type);
+		if (ZEND_TYPE_IS_SET(arena_elem->key_type)) {
+			persistent_elem->key_type = zend_persist_shape_type(arena_elem->key_type);
+		} else {
+			persistent_elem->key_type = arena_elem->key_type;
+		}
+
+		result.ptr = persistent_elem;
+		return result;
+	}
+
+	/* Handle class/type name: copy to persistent memory */
+	if (ZEND_TYPE_HAS_NAME(type)) {
+		/* Use dup with persistent=1 since arena strings will be freed */
+		zend_string *persistent_name = zend_string_dup(ZEND_TYPE_NAME(type), 1);
+		ZEND_TYPE_SET_PTR(result, persistent_name);
+		return result;
+	}
+
+	/* Handle type lists (unions): copy list to persistent memory */
+	if (ZEND_TYPE_HAS_LIST(type)) {
+		zend_type_list *arena_list = ZEND_TYPE_LIST(type);
+		size_t list_size = ZEND_TYPE_LIST_SIZE(arena_list->num_types);
+		zend_type_list *persistent_list = pemalloc(list_size, 1);
+
+		persistent_list->num_types = arena_list->num_types;
+		for (uint32_t i = 0; i < arena_list->num_types; i++) {
+			persistent_list->types[i] = zend_persist_shape_type(arena_list->types[i]);
+		}
+
+		ZEND_TYPE_SET_LIST(result, persistent_list);
+		/* Clear arena bit since we're using malloc now */
+		result.type_mask &= ~_ZEND_TYPE_ARENA_BIT;
+		return result;
+	}
+
+	/* Simple type (int, string, etc.) - no allocation needed */
+	return result;
+}
+/* }}} */
+
 static void zend_compile_shape_decl(zend_ast *ast) /* {{{ */
 {
 	zend_ast *name_ast = ast->child[0];
@@ -10014,13 +10096,17 @@ static void zend_compile_shape_decl(zend_ast *ast) /* {{{ */
 			"Cannot redeclare shape %s", ZSTR_VAL(name));
 	}
 
-	/* Compile the type expression */
-	zend_type type = zend_compile_typename(type_ast);
+	/* Compile the type expression (uses arena allocation) */
+	zend_type arena_type = zend_compile_typename(type_ast);
+
+	/* Copy type to persistent memory for shape table storage */
+	zend_type persistent_type = zend_persist_shape_type(arena_type);
 
 	/* Create and store the shape entry in global table */
 	zend_shape_entry *entry = pemalloc(sizeof(zend_shape_entry), 1);
-	entry->name = zend_string_copy(name);
-	entry->type = type;
+	/* Use dup with persistent=1 since name may be arena-allocated */
+	entry->name = zend_string_dup(name, 1);
+	entry->type = persistent_type;
 
 	zend_hash_add_ptr(CG(shape_table), lcname, entry);
 

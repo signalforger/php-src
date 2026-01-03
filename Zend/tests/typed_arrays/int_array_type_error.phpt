@@ -2,6 +2,7 @@
 Typed array: array<int> type error when returning wrong type
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function getNumbers(): array<int> {
     return [1, 2, "three", 4];
@@ -15,4 +16,4 @@ try {
 
 ?>
 --EXPECTF--
-Caught: getNumbers(): Return value must be of type array<int>, array containing string given
+Caught: getNumbers(): Return value must be of type array<int>, array element at index 2 is string

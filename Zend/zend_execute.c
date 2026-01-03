@@ -1068,6 +1068,9 @@ ZEND_API bool zend_never_inline zend_verify_property_type(const zend_property_in
 	return i_zend_verify_property_type(info, property, strict);
 }
 
+/* Forward declaration - defined later after zend_check_array_shape */
+ZEND_API bool zend_verify_array_prop_shape(const zend_property_info *info, zval *arr, const zend_array_shape *shape);
+
 static zend_never_inline zval* zend_assign_to_typed_prop(const zend_property_info *info, zval *property_val, zval *value, zend_refcounted **garbage_ptr EXECUTE_DATA_DC)
 {
 	zval tmp;
@@ -1092,11 +1095,19 @@ static zend_never_inline zval* zend_assign_to_typed_prop(const zend_property_inf
 	}
 
 	/* Check array element types if strict_arrays is enabled */
-	if (EX_USES_STRICT_ARRAYS() && Z_TYPE(tmp) == IS_ARRAY && ZEND_TYPE_HAS_ARRAY_ELEMENT(info->type)) {
-		zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(info->type);
-		if (!zend_verify_array_prop_element_types(info, &tmp, elem_type)) {
-			zval_ptr_dtor(&tmp);
-			return &EG(uninitialized_zval);
+	if (EX_USES_STRICT_ARRAYS() && Z_TYPE(tmp) == IS_ARRAY) {
+		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(info->type)) {
+			zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(info->type);
+			if (!zend_verify_array_prop_element_types(info, &tmp, elem_type)) {
+				zval_ptr_dtor(&tmp);
+				return &EG(uninitialized_zval);
+			}
+		} else if (ZEND_TYPE_HAS_ARRAY_SHAPE(info->type)) {
+			zend_array_shape *shape = ZEND_ARRAY_SHAPE(info->type);
+			if (!zend_verify_array_prop_shape(info, &tmp, shape)) {
+				zval_ptr_dtor(&tmp);
+				return &EG(uninitialized_zval);
+			}
 		}
 	}
 
@@ -2182,14 +2193,18 @@ static ZEND_COLD void zend_shape_return_error(
 	const char *fclass = zf->common.scope ? ZSTR_VAL(zf->common.scope->name) : "";
 
 	if (result == SHAPE_MISSING_KEY) {
-		zend_type_error("%s%s%s(): Return value must be of type array{%s: ...}, "
-			"missing required key \"%s\"",
-			fclass, fsep, fname, ZSTR_VAL(elem->key), ZSTR_VAL(elem->key));
+		zend_string *expected = zend_type_to_string(elem->type);
+		zend_type_error("%s%s%s(): Return value must be of type array{%s: %s, ...}, "
+			"array given with missing key \"%s\"",
+			fclass, fsep, fname, ZSTR_VAL(elem->key), ZSTR_VAL(expected),
+			ZSTR_VAL(elem->key));
+		zend_string_release(expected);
 	} else {
 		zend_string *expected = zend_type_to_string(elem->type);
-		zend_type_error("%s%s%s(): Return value key \"%s\" must be of type %s, %s given",
-			fclass, fsep, fname, ZSTR_VAL(elem->key),
-			ZSTR_VAL(expected), zend_zval_value_name(val));
+		zend_type_error("%s%s%s(): Return value must be of type array{%s: %s, ...}, "
+			"array key \"%s\" is %s",
+			fclass, fsep, fname, ZSTR_VAL(elem->key), ZSTR_VAL(expected),
+			ZSTR_VAL(elem->key), zend_zval_value_name(val));
 		zend_string_release(expected);
 	}
 }
@@ -2199,13 +2214,17 @@ static ZEND_COLD void zend_shape_arg_error(
 	const zend_array_shape_element *elem, zval *val)
 {
 	if (result == SHAPE_MISSING_KEY) {
-		zend_type_error("Argument #%u must be of type array{%s: ...}, "
-			"missing required key \"%s\"",
-			arg_num, ZSTR_VAL(elem->key), ZSTR_VAL(elem->key));
+		zend_string *expected = zend_type_to_string(elem->type);
+		zend_argument_type_error(arg_num,
+			"must be of type array{%s: %s, ...}, array given with missing key \"%s\"",
+			ZSTR_VAL(elem->key), ZSTR_VAL(expected), ZSTR_VAL(elem->key));
+		zend_string_release(expected);
 	} else {
 		zend_string *expected = zend_type_to_string(elem->type);
-		zend_type_error("Argument #%u key \"%s\" must be of type %s, %s given",
-			arg_num, ZSTR_VAL(elem->key), ZSTR_VAL(expected), zend_zval_value_name(val));
+		zend_argument_type_error(arg_num,
+			"must be of type array{%s: %s, ...}, array key \"%s\" is %s",
+			ZSTR_VAL(elem->key), ZSTR_VAL(expected),
+			ZSTR_VAL(elem->key), zend_zval_value_name(val));
 		zend_string_release(expected);
 	}
 }
@@ -2242,13 +2261,64 @@ ZEND_API bool zend_verify_array_arg_shape(
 	return true;
 }
 
-/* Check if a type name is actually a shape and validate accordingly */
-static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_return_type)
+static ZEND_COLD void zend_shape_prop_error(
+	const zend_property_info *info, zend_shape_check_result result,
+	const zend_array_shape_element *elem, zval *val)
 {
-	(void)is_return_type; /* Reserved for future error messages */
+	if (result == SHAPE_MISSING_KEY) {
+		zend_string *expected = zend_type_to_string(elem->type);
+		zend_type_error("Cannot assign to property %s::$%s of type array{%s: %s, ...}, "
+			"array given with missing key \"%s\"",
+			ZSTR_VAL(info->ce->name), ZSTR_VAL(info->name),
+			ZSTR_VAL(elem->key), ZSTR_VAL(expected), ZSTR_VAL(elem->key));
+		zend_string_release(expected);
+	} else {
+		zend_string *expected = zend_type_to_string(elem->type);
+		zend_type_error("Cannot assign to property %s::$%s of type array{%s: %s, ...}, "
+			"array key \"%s\" is %s",
+			ZSTR_VAL(info->ce->name), ZSTR_VAL(info->name),
+			ZSTR_VAL(elem->key), ZSTR_VAL(expected),
+			ZSTR_VAL(elem->key), zend_zval_value_name(val));
+		zend_string_release(expected);
+	}
+}
 
+ZEND_API bool zend_verify_array_prop_shape(
+	const zend_property_info *info, zval *arr, const zend_array_shape *shape)
+{
+	const zend_array_shape_element *failed_elem;
+	zval *failed_val;
+
+	zend_shape_check_result result = zend_check_array_shape(
+		Z_ARRVAL_P(arr), shape, &failed_elem, &failed_val);
+
+	if (UNEXPECTED(result != SHAPE_OK)) {
+		zend_shape_prop_error(info, result, failed_elem, failed_val);
+		return false;
+	}
+	return true;
+}
+
+/* Maximum recursion depth for shape validation to prevent infinite loops
+ * in case of circular shape references (e.g., shape A references shape B
+ * which references shape A). This is similar to other PHP recursion limits. */
+#define ZEND_SHAPE_MAX_RECURSION_DEPTH 64
+
+/* Thread-local recursion depth counter for shape validation */
+ZEND_TLS int zend_shape_recursion_depth = 0;
+
+/* Check if a type name is actually a shape and validate accordingly */
+static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_return_type ZEND_ATTRIBUTE_UNUSED)
+{
 	if (!ZEND_TYPE_HAS_NAME(*type)) {
 		return false;
+	}
+
+	/* Check for excessive recursion depth (circular shape references) */
+	if (UNEXPECTED(zend_shape_recursion_depth >= ZEND_SHAPE_MAX_RECURSION_DEPTH)) {
+		zend_error_noreturn(E_ERROR,
+			"Maximum shape nesting level of %d exceeded, possible circular reference",
+			ZEND_SHAPE_MAX_RECURSION_DEPTH);
 	}
 
 	zend_string *name = ZEND_TYPE_NAME(*type);
@@ -2263,6 +2333,10 @@ static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_retu
 		return false;  /* Shapes require arrays */
 	}
 
+	/* Track recursion depth to detect circular references */
+	zend_shape_recursion_depth++;
+	bool result = false;
+
 	/* Use the shape's type for validation */
 	zend_type shape_type = shape->type;
 
@@ -2272,9 +2346,10 @@ static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_retu
 		const zend_array_shape_element *failed_elem;
 		zval *failed_val;
 		/* Validate the array against the shape definition */
-		zend_shape_check_result result = zend_check_array_shape(
+		zend_shape_check_result check_result = zend_check_array_shape(
 			Z_ARRVAL_P(arg), shape_def, &failed_elem, &failed_val);
-		return result == SHAPE_OK;
+		result = (check_result == SHAPE_OK);
+		goto done;
 	}
 
 	/* Check if it's a typed array */
@@ -2282,20 +2357,24 @@ static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_retu
 		zend_typed_array_element *elem = ZEND_TYPED_ARRAY_ELEMENT(shape_type);
 		HashTable *ht = Z_ARRVAL_P(arg);
 		zval *val;
+		result = true;
 		ZEND_HASH_FOREACH_VAL(ht, val) {
 			if (!ZEND_TYPE_CONTAINS_CODE(elem->element_type, Z_TYPE_P(val))) {
-				return false;
+				result = false;
+				break;
 			}
 		} ZEND_HASH_FOREACH_END();
-		return true;
+		goto done;
 	}
 
 	/* For simple array type */
 	if (ZEND_TYPE_PURE_MASK(shape_type) & MAY_BE_ARRAY) {
-		return true;
+		result = true;
 	}
 
-	return false;
+done:
+	zend_shape_recursion_depth--;
+	return result;
 }
 
 ZEND_API ZEND_COLD void zend_verify_never_error(const zend_function *zf)

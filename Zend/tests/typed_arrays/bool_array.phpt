@@ -2,6 +2,7 @@
 Typed array: array<bool> functionality
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function getFlags(): array<bool> {
     return [true, false, true, true];

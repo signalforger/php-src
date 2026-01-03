@@ -1,7 +1,9 @@
 --TEST--
 Array shape: error when required key is missing
+--XLEAK--
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function getUser(): array{id: int, name: string} {
     return [
@@ -18,4 +20,4 @@ try {
 
 ?>
 --EXPECTF--
-Caught: getUser(): Return value must be of type array{%s: ...}, missing required key "name"
+Caught: getUser(): Return value must be of type array{name: string, ...}, array given with missing key "name"

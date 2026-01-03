@@ -1297,88 +1297,32 @@ ZEND_API zend_class_entry *zend_lookup_class(zend_string *name) /* {{{ */
 }
 /* }}} */
 
-ZEND_API zend_shape_entry *zend_lookup_shape_ex(zend_string *name, zend_string *key, uint32_t flags) /* {{{ */
+ZEND_API zend_shape_entry *zend_lookup_shape_ex(zend_string *name, zend_string *lc_name, uint32_t flags ZEND_ATTRIBUTE_UNUSED) /* {{{ */
 {
-	zend_shape_entry *shape = NULL;
 	zval *zv;
-	zend_string *lc_name;
-	zend_string *autoload_name;
+	zend_string *lookup_name;
+	bool free_lookup_name = false;
 
-	if (key) {
-		lc_name = key;
+	if (lc_name) {
+		lookup_name = lc_name;
 	} else {
 		if (!ZSTR_LEN(name)) {
 			return NULL;
 		}
 
 		if (ZSTR_VAL(name)[0] == '\\') {
-			lc_name = zend_string_alloc(ZSTR_LEN(name) - 1, 0);
-			zend_str_tolower_copy(ZSTR_VAL(lc_name), ZSTR_VAL(name) + 1, ZSTR_LEN(name) - 1);
+			lookup_name = zend_string_alloc(ZSTR_LEN(name) - 1, 0);
+			zend_str_tolower_copy(ZSTR_VAL(lookup_name), ZSTR_VAL(name) + 1, ZSTR_LEN(name) - 1);
 		} else {
-			lc_name = zend_string_tolower(name);
+			lookup_name = zend_string_tolower(name);
 		}
+		free_lookup_name = true;
 	}
 
-	zv = zend_hash_find(EG(shape_table), lc_name);
-	if (zv) {
-		if (!key) {
-			zend_string_release_ex(lc_name, 0);
-		}
-		return (zend_shape_entry*)Z_PTR_P(zv);
-	}
+	zv = zend_hash_find(EG(shape_table), lookup_name);
 
-	/* The compiler is not-reentrant. Make sure we autoload only during run-time. */
-	if ((flags & ZEND_FETCH_CLASS_NO_AUTOLOAD) || zend_is_compiling()) {
-		if (!key) {
-			zend_string_release_ex(lc_name, 0);
-		}
-		return NULL;
-	}
-
-	if (!zend_autoload) {
-		if (!key) {
-			zend_string_release_ex(lc_name, 0);
-		}
-		return NULL;
-	}
-
-	/* Prevent recursive autoloading of the same shape */
-	if (EG(in_autoload) == NULL) {
-		ALLOC_HASHTABLE(EG(in_autoload));
-		zend_hash_init(EG(in_autoload), 8, NULL, NULL, 0);
-	}
-
-	if (zend_hash_add_empty_element(EG(in_autoload), lc_name) == NULL) {
-		if (!key) {
-			zend_string_release_ex(lc_name, 0);
-		}
-		return NULL;
-	}
-
-	if (ZSTR_VAL(name)[0] == '\\') {
-		autoload_name = zend_string_init(ZSTR_VAL(name) + 1, ZSTR_LEN(name) - 1, 0);
-	} else {
-		autoload_name = zend_string_copy(name);
-	}
-
-	zend_string *previous_filename = EG(filename_override);
-	zend_long previous_lineno = EG(lineno_override);
-	EG(filename_override) = NULL;
-	EG(lineno_override) = -1;
-	zend_exception_save();
-	/* Try to autoload - the autoloader may define the shape */
-	zend_autoload(autoload_name, lc_name);
-	zend_exception_restore();
-	EG(filename_override) = previous_filename;
-	EG(lineno_override) = previous_lineno;
-
-	zend_string_release_ex(autoload_name, 0);
-	zend_hash_del(EG(in_autoload), lc_name);
-
-	/* Check if shape was loaded */
-	zv = zend_hash_find(EG(shape_table), lc_name);
-	if (!key) {
-		zend_string_release_ex(lc_name, 0);
+	if (free_lookup_name) {
+		zend_string_release_ex(lookup_name, 0);
 	}
 
 	if (zv) {

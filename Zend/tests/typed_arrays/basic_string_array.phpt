@@ -2,6 +2,7 @@
 Typed array: array<string> basic functionality
 --FILE--
 <?php
+declare(strict_arrays=1);
 
 function getNames(): array<string> {
     return ["Alice", "Bob", "Charlie"];
