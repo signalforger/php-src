@@ -2187,42 +2187,37 @@ static ZEND_COLD void zend_shape_return_error(
 	const char *fname = ZSTR_VAL(zf->common.function_name);
 	const char *fsep = zf->common.scope ? "::" : "";
 	const char *fclass = zf->common.scope ? ZSTR_VAL(zf->common.scope->name) : "";
+	zend_string *expected = zend_type_to_string(elem->type);
 
 	if (result == SHAPE_MISSING_KEY) {
-		zend_string *expected = zend_type_to_string(elem->type);
-		zend_type_error("%s%s%s(): Return value must be of type array{%s: %s, ...}, "
-			"array given with missing key \"%s\"",
+		zend_type_error("%s%s%s(): Return value must be of type " ZEND_SHAPE_ERROR_FORMAT_MISSING_KEY,
 			fclass, fsep, fname, ZSTR_VAL(elem->key), ZSTR_VAL(expected),
 			ZSTR_VAL(elem->key));
-		zend_string_release(expected);
 	} else {
-		zend_string *expected = zend_type_to_string(elem->type);
-		zend_type_error("%s%s%s(): Return value must be of type array{%s: %s, ...}, "
-			"array key \"%s\" is %s",
+		zend_type_error("%s%s%s(): Return value must be of type " ZEND_SHAPE_ERROR_FORMAT_WRONG_TYPE,
 			fclass, fsep, fname, ZSTR_VAL(elem->key), ZSTR_VAL(expected),
 			ZSTR_VAL(elem->key), zend_zval_value_name(val));
-		zend_string_release(expected);
 	}
+	zend_string_release(expected);
 }
 
 static ZEND_COLD void zend_shape_arg_error(
 	uint32_t arg_num, zend_shape_check_result result,
 	const zend_array_shape_element *elem, zval *val)
 {
+	zend_string *expected = zend_type_to_string(elem->type);
+
 	if (result == SHAPE_MISSING_KEY) {
-		zend_string *expected = zend_type_to_string(elem->type);
 		zend_argument_type_error(arg_num,
-			"must be of type array{%s: %s, ...}, array given with missing key \"%s\"",
+			"must be of type " ZEND_SHAPE_ERROR_FORMAT_MISSING_KEY,
 			ZSTR_VAL(elem->key), ZSTR_VAL(expected), ZSTR_VAL(elem->key));
-		zend_string_release(expected);
 	} else {
-		zend_string *expected = zend_type_to_string(elem->type);
 		zend_argument_type_error(arg_num,
-			"must be of type array{%s: %s, ...}, array key \"%s\" is %s",
+			"must be of type " ZEND_SHAPE_ERROR_FORMAT_WRONG_TYPE,
 			ZSTR_VAL(elem->key), ZSTR_VAL(expected),
 			ZSTR_VAL(elem->key), zend_zval_value_name(val));
-		zend_string_release(expected);
 	}
+	zend_string_release(expected);
 }
 
 ZEND_API bool zend_verify_array_shape(
@@ -2261,22 +2256,19 @@ static ZEND_COLD void zend_shape_prop_error(
 	const zend_property_info *info, zend_shape_check_result result,
 	const zend_array_shape_element *elem, zval *val)
 {
+	zend_string *expected = zend_type_to_string(elem->type);
+
 	if (result == SHAPE_MISSING_KEY) {
-		zend_string *expected = zend_type_to_string(elem->type);
-		zend_type_error("Cannot assign to property %s::$%s of type array{%s: %s, ...}, "
-			"array given with missing key \"%s\"",
+		zend_type_error("Cannot assign to property %s::$%s of type " ZEND_SHAPE_ERROR_FORMAT_MISSING_KEY,
 			ZSTR_VAL(info->ce->name), ZSTR_VAL(info->name),
 			ZSTR_VAL(elem->key), ZSTR_VAL(expected), ZSTR_VAL(elem->key));
-		zend_string_release(expected);
 	} else {
-		zend_string *expected = zend_type_to_string(elem->type);
-		zend_type_error("Cannot assign to property %s::$%s of type array{%s: %s, ...}, "
-			"array key \"%s\" is %s",
+		zend_type_error("Cannot assign to property %s::$%s of type " ZEND_SHAPE_ERROR_FORMAT_WRONG_TYPE,
 			ZSTR_VAL(info->ce->name), ZSTR_VAL(info->name),
 			ZSTR_VAL(elem->key), ZSTR_VAL(expected),
 			ZSTR_VAL(elem->key), zend_zval_value_name(val));
-		zend_string_release(expected);
 	}
+	zend_string_release(expected);
 }
 
 ZEND_API bool zend_verify_array_prop_shape(

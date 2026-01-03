@@ -157,9 +157,17 @@ typedef struct {
 #define _ZEND_TYPE_INTERSECTION_BIT (1u << 19)
 /* Whether the type is a union type */
 #define _ZEND_TYPE_UNION_BIT (1u << 18)
-/* Whether the type is an array shape (array{key: type}) */
+
+/* Array shape type bits use high bits (29-30) to avoid conflict with other type flags.
+ * Bit allocation in type_mask:
+ *   Bits 0-17:  MAY_BE_* type bits (IS_UNDEF through IS_NEVER)
+ *   Bits 18-24: Type modifiers (union, intersection, arena, iterable, kind)
+ *   Bits 25-28: Reserved
+ *   Bit 29:     Shape name reference (runtime-resolved shape alias)
+ *   Bit 30:     Array shape (inline array{key: type} definition)
+ *   Bit 31:     Unused (sign bit)
+ */
 #define _ZEND_TYPE_ARRAY_SHAPE_BIT (1u << 30)
-/* Whether the type is a shape name reference (to be resolved at runtime) */
 #define _ZEND_TYPE_SHAPE_NAME_BIT (1u << 29)
 /* Type mask for MAY_BE_* type bits only (bits 0-17, including IS_NEVER) */
 #define _ZEND_TYPE_MAY_BE_MASK ((1u << 18) - 1)
