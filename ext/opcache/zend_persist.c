@@ -371,6 +371,40 @@ static void zend_persist_type(zend_type *type) {
 		ZEND_TYPE_SET_PTR(*type, list);
 	}
 
+	/* Handle typed array (array<T> or array<K, V>) */
+	if ((type->type_mask & (1u << IS_ARRAY)) && type->ptr != NULL
+		&& !ZEND_TYPE_IS_COMPLEX(*type) && !ZEND_TYPE_HAS_ARRAY_SHAPE(*type)) {
+		zend_typed_array_element *elem = ZEND_TYPED_ARRAY_ELEMENT(*type);
+		if (!zend_accel_in_shm(elem)) {
+			elem = zend_shared_memdup_put(elem, sizeof(zend_typed_array_element));
+			ZEND_TYPE_SET_PTR(*type, elem);
+		}
+		/* Recursively persist element and key types */
+		zend_persist_type(&elem->element_type);
+		if (ZEND_TYPE_IS_SET(elem->key_type)) {
+			zend_persist_type(&elem->key_type);
+		}
+	}
+
+	/* Handle array shape (array{key: type, ...}) */
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(*type)) {
+		zend_array_shape *shape = ZEND_ARRAY_SHAPE(*type);
+		if (!zend_accel_in_shm(shape)) {
+			size_t shape_size = sizeof(zend_array_shape)
+				+ shape->num_elements * sizeof(zend_array_shape_element);
+			shape = zend_shared_memdup_put(shape, shape_size);
+			ZEND_TYPE_SET_PTR(*type, shape);
+		}
+		/* Persist each element's key string and type */
+		for (uint32_t i = 0; i < shape->num_elements; i++) {
+			zend_array_shape_element *elem = &shape->elements[i];
+			if (elem->key) {
+				zend_accel_store_interned_string(elem->key);
+			}
+			zend_persist_type(&elem->type);
+		}
+	}
+
 	zend_type *single_type;
 	ZEND_TYPE_FOREACH_MUTABLE(*type, single_type) {
 		if (ZEND_TYPE_HAS_LIST(*single_type)) {

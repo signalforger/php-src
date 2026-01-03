@@ -201,6 +201,30 @@ static void zend_persist_type_calc(zend_type *type)
 		ADD_SIZE(ZEND_TYPE_LIST_SIZE(ZEND_TYPE_LIST(*type)->num_types));
 	}
 
+	/* Handle typed array (array<T> or array<K, V>) */
+	if ((type->type_mask & (1u << IS_ARRAY)) && type->ptr != NULL
+		&& !ZEND_TYPE_IS_COMPLEX(*type) && !ZEND_TYPE_HAS_ARRAY_SHAPE(*type)) {
+		zend_typed_array_element *elem = ZEND_TYPED_ARRAY_ELEMENT(*type);
+		ADD_SIZE(sizeof(zend_typed_array_element));
+		zend_persist_type_calc(&elem->element_type);
+		if (ZEND_TYPE_IS_SET(elem->key_type)) {
+			zend_persist_type_calc(&elem->key_type);
+		}
+	}
+
+	/* Handle array shape (array{key: type, ...}) */
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(*type)) {
+		zend_array_shape *shape = ZEND_ARRAY_SHAPE(*type);
+		ADD_SIZE(sizeof(zend_array_shape) + shape->num_elements * sizeof(zend_array_shape_element));
+		for (uint32_t i = 0; i < shape->num_elements; i++) {
+			zend_array_shape_element *elem = &shape->elements[i];
+			if (elem->key) {
+				ADD_INTERNED_STRING(elem->key);
+			}
+			zend_persist_type_calc(&elem->type);
+		}
+	}
+
 	zend_type *single_type;
 	ZEND_TYPE_FOREACH_MUTABLE(*type, single_type) {
 		if (ZEND_TYPE_HAS_LIST(*single_type)) {

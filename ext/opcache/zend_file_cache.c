@@ -484,6 +484,34 @@ static void zend_file_cache_serialize_type(
 		SERIALIZE_STR(type_name);
 		ZEND_TYPE_SET_PTR(*type, type_name);
 	}
+
+	/* Handle typed array (array<T> or array<K, V>) */
+	if ((type->type_mask & (1u << IS_ARRAY)) && type->ptr != NULL
+		&& !ZEND_TYPE_IS_COMPLEX(*type) && !ZEND_TYPE_HAS_ARRAY_SHAPE(*type)) {
+		zend_typed_array_element *elem = ZEND_TYPED_ARRAY_ELEMENT(*type);
+		SERIALIZE_PTR(elem);
+		ZEND_TYPE_SET_PTR(*type, elem);
+		UNSERIALIZE_PTR(elem);
+		zend_file_cache_serialize_type(&elem->element_type, script, info, buf);
+		if (ZEND_TYPE_IS_SET(elem->key_type)) {
+			zend_file_cache_serialize_type(&elem->key_type, script, info, buf);
+		}
+	}
+
+	/* Handle array shape (array{key: type, ...}) */
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(*type)) {
+		zend_array_shape *shape = ZEND_ARRAY_SHAPE(*type);
+		SERIALIZE_PTR(shape);
+		ZEND_TYPE_SET_PTR(*type, shape);
+		UNSERIALIZE_PTR(shape);
+		for (uint32_t i = 0; i < shape->num_elements; i++) {
+			zend_array_shape_element *elem = &shape->elements[i];
+			if (elem->key) {
+				SERIALIZE_STR(elem->key);
+			}
+			zend_file_cache_serialize_type(&elem->type, script, info, buf);
+		}
+	}
 }
 
 static void zend_file_cache_serialize_op_array(zend_op_array            *op_array,
@@ -1397,6 +1425,32 @@ static void zend_file_cache_unserialize_type(
 			zend_accel_get_class_name_map_ptr(type_name);
 		} else {
 			zend_alloc_ce_cache(type_name);
+		}
+	}
+
+	/* Handle typed array (array<T> or array<K, V>) */
+	if ((type->type_mask & (1u << IS_ARRAY)) && type->ptr != NULL
+		&& !ZEND_TYPE_IS_COMPLEX(*type) && !ZEND_TYPE_HAS_ARRAY_SHAPE(*type)) {
+		zend_typed_array_element *elem = ZEND_TYPED_ARRAY_ELEMENT(*type);
+		UNSERIALIZE_PTR(elem);
+		ZEND_TYPE_SET_PTR(*type, elem);
+		zend_file_cache_unserialize_type(&elem->element_type, scope, script, buf);
+		if (ZEND_TYPE_IS_SET(elem->key_type)) {
+			zend_file_cache_unserialize_type(&elem->key_type, scope, script, buf);
+		}
+	}
+
+	/* Handle array shape (array{key: type, ...}) */
+	if (ZEND_TYPE_HAS_ARRAY_SHAPE(*type)) {
+		zend_array_shape *shape = ZEND_ARRAY_SHAPE(*type);
+		UNSERIALIZE_PTR(shape);
+		ZEND_TYPE_SET_PTR(*type, shape);
+		for (uint32_t i = 0; i < shape->num_elements; i++) {
+			zend_array_shape_element *elem = &shape->elements[i];
+			if (elem->key) {
+				UNSERIALIZE_STR(elem->key);
+			}
+			zend_file_cache_unserialize_type(&elem->type, scope, script, buf);
 		}
 	}
 }
