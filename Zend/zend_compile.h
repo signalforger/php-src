@@ -136,6 +136,7 @@ typedef struct _zend_array_shape_element {
 typedef struct _zend_array_shape {
 	uint32_t num_elements;               /* Number of shape elements */
 	uint32_t num_required;               /* Number of required (non-optional) elements */
+	bool is_closed;                      /* If true, no extra keys allowed (array{...}!) */
 	zend_array_shape_element elements[]; /* Flexible array member */
 } zend_array_shape;
 
@@ -182,7 +183,8 @@ typedef struct _zend_shape_entry {
 typedef enum {
 	SHAPE_OK = 0,           /* Validation passed */
 	SHAPE_MISSING_KEY = 1,  /* Required key is missing from array */
-	SHAPE_WRONG_TYPE = 2    /* Key exists but value has wrong type */
+	SHAPE_WRONG_TYPE = 2,   /* Key exists but value has wrong type */
+	SHAPE_EXTRA_KEY = 3     /* Extra key found in closed shape */
 } zend_shape_check_result;
 
 /* Error message format for shape type errors.
@@ -191,6 +193,8 @@ typedef enum {
 	"array{%s: %s, ...}, array given with missing key \"%s\""
 #define ZEND_SHAPE_ERROR_FORMAT_WRONG_TYPE \
 	"array{%s: %s, ...}, array key \"%s\" is %s"
+#define ZEND_SHAPE_ERROR_FORMAT_EXTRA_KEY \
+	"closed shape, unexpected extra key \"%s\""
 
 typedef struct _zend_file_context {
 	zend_declarables declarables;

@@ -767,6 +767,9 @@ class ReflectionArrayShapeType extends ReflectionType
 
     /** Get the number of required (non-optional) elements */
     public function getRequiredElementCount(): int {}
+
+    /** Check if this is a closed shape (no extra keys allowed) */
+    public function isClosed(): bool {}
 }
 
 /** Represents an element in an array shape type */

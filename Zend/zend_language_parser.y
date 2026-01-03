@@ -890,9 +890,13 @@ type_without_static:
 	|	T_ARRAY '<' type_expr ',' type_expr '>'
 			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_MAP, $3, $5); }
 	|	T_ARRAY_SHAPE_START shape_element_list '}'
-			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_SHAPE, $2); }
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_ARRAY_SHAPE, 0, $2); }
 	|	T_ARRAY_SHAPE_START '}'
-			{ $$ = zend_ast_create(ZEND_AST_TYPE_ARRAY_SHAPE, NULL); }
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_ARRAY_SHAPE, 0, NULL); }
+	|	T_ARRAY_SHAPE_START shape_element_list '}' '!'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_ARRAY_SHAPE, 1, $2); }
+	|	T_ARRAY_SHAPE_START '}' '!'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_ARRAY_SHAPE, 1, NULL); }
 ;
 
 shape_element_list:

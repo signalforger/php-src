@@ -3423,6 +3423,23 @@ ZEND_METHOD(ReflectionArrayShapeType, getRequiredElementCount)
 }
 /* }}} */
 
+/* {{{ Returns whether this is a closed shape (no extra keys allowed) */
+ZEND_METHOD(ReflectionArrayShapeType, isClosed)
+{
+	reflection_object *intern;
+	type_reference *param;
+	zend_array_shape *shape;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_ARRAY_SHAPE(param->type));
+	shape = ZEND_ARRAY_SHAPE(param->type);
+
+	RETURN_BOOL(shape->is_closed);
+}
+/* }}} */
+
 /* {{{ Returns the key name of this array shape element */
 ZEND_METHOD(ReflectionArrayShapeElement, getName)
 {

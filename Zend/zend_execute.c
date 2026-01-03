@@ -2155,7 +2155,8 @@ ZEND_API bool zend_verify_array_prop_element_types(
 
 static zend_always_inline zend_shape_check_result zend_check_array_shape(
 	HashTable *ht, const zend_array_shape *shape,
-	const zend_array_shape_element **failed_elem, zval **failed_val)
+	const zend_array_shape_element **failed_elem, zval **failed_val,
+	zend_string **extra_key)
 {
 	for (uint32_t i = 0; i < shape->num_elements; i++) {
 		const zend_array_shape_element *elem = &shape->elements[i];
@@ -2177,16 +2178,46 @@ static zend_always_inline zend_shape_check_result zend_check_array_shape(
 		}
 	}
 
+	/* For closed shapes, check that no extra keys exist */
+	if (UNEXPECTED(shape->is_closed)) {
+		if (zend_hash_num_elements(ht) != shape->num_elements) {
+			/* Find the first extra key for error message */
+			zend_string *key;
+			ZEND_HASH_FOREACH_STR_KEY(ht, key) {
+				if (key) {
+					bool found = false;
+					for (uint32_t i = 0; i < shape->num_elements; i++) {
+						if (zend_string_equals(key, shape->elements[i].key)) {
+							found = true;
+							break;
+						}
+					}
+					if (!found) {
+						*extra_key = key;
+						return SHAPE_EXTRA_KEY;
+					}
+				}
+			} ZEND_HASH_FOREACH_END();
+		}
+	}
+
 	return SHAPE_OK;
 }
 
 static ZEND_COLD void zend_shape_return_error(
 	const zend_function *zf, zend_shape_check_result result,
-	const zend_array_shape_element *elem, zval *val)
+	const zend_array_shape_element *elem, zval *val, zend_string *extra_key)
 {
 	const char *fname = ZSTR_VAL(zf->common.function_name);
 	const char *fsep = zf->common.scope ? "::" : "";
 	const char *fclass = zf->common.scope ? ZSTR_VAL(zf->common.scope->name) : "";
+
+	if (result == SHAPE_EXTRA_KEY) {
+		zend_type_error("%s%s%s(): Return value must be of type " ZEND_SHAPE_ERROR_FORMAT_EXTRA_KEY,
+			fclass, fsep, fname, ZSTR_VAL(extra_key));
+		return;
+	}
+
 	zend_string *expected = zend_type_to_string(elem->type);
 
 	if (result == SHAPE_MISSING_KEY) {
@@ -2203,8 +2234,15 @@ static ZEND_COLD void zend_shape_return_error(
 
 static ZEND_COLD void zend_shape_arg_error(
 	uint32_t arg_num, zend_shape_check_result result,
-	const zend_array_shape_element *elem, zval *val)
+	const zend_array_shape_element *elem, zval *val, zend_string *extra_key)
 {
+	if (result == SHAPE_EXTRA_KEY) {
+		zend_argument_type_error(arg_num,
+			"must be of type " ZEND_SHAPE_ERROR_FORMAT_EXTRA_KEY,
+			ZSTR_VAL(extra_key));
+		return;
+	}
+
 	zend_string *expected = zend_type_to_string(elem->type);
 
 	if (result == SHAPE_MISSING_KEY) {
@@ -2225,12 +2263,13 @@ ZEND_API bool zend_verify_array_shape(
 {
 	const zend_array_shape_element *failed_elem;
 	zval *failed_val;
+	zend_string *extra_key = NULL;
 
 	zend_shape_check_result result = zend_check_array_shape(
-		Z_ARRVAL_P(arr), shape, &failed_elem, &failed_val);
+		Z_ARRVAL_P(arr), shape, &failed_elem, &failed_val, &extra_key);
 
 	if (UNEXPECTED(result != SHAPE_OK)) {
-		zend_shape_return_error(zf, result, failed_elem, failed_val);
+		zend_shape_return_error(zf, result, failed_elem, failed_val, extra_key);
 		return false;
 	}
 	return true;
@@ -2241,12 +2280,13 @@ ZEND_API bool zend_verify_array_arg_shape(
 {
 	const zend_array_shape_element *failed_elem;
 	zval *failed_val;
+	zend_string *extra_key = NULL;
 
 	zend_shape_check_result result = zend_check_array_shape(
-		Z_ARRVAL_P(arr), shape, &failed_elem, &failed_val);
+		Z_ARRVAL_P(arr), shape, &failed_elem, &failed_val, &extra_key);
 
 	if (UNEXPECTED(result != SHAPE_OK)) {
-		zend_shape_arg_error(arg_num, result, failed_elem, failed_val);
+		zend_shape_arg_error(arg_num, result, failed_elem, failed_val, extra_key);
 		return false;
 	}
 	return true;
@@ -2254,8 +2294,15 @@ ZEND_API bool zend_verify_array_arg_shape(
 
 static ZEND_COLD void zend_shape_prop_error(
 	const zend_property_info *info, zend_shape_check_result result,
-	const zend_array_shape_element *elem, zval *val)
+	const zend_array_shape_element *elem, zval *val, zend_string *extra_key)
 {
+	if (result == SHAPE_EXTRA_KEY) {
+		zend_type_error("Cannot assign to property %s::$%s of type " ZEND_SHAPE_ERROR_FORMAT_EXTRA_KEY,
+			ZSTR_VAL(info->ce->name), ZSTR_VAL(info->name),
+			ZSTR_VAL(extra_key));
+		return;
+	}
+
 	zend_string *expected = zend_type_to_string(elem->type);
 
 	if (result == SHAPE_MISSING_KEY) {
@@ -2276,12 +2323,13 @@ ZEND_API bool zend_verify_array_prop_shape(
 {
 	const zend_array_shape_element *failed_elem;
 	zval *failed_val;
+	zend_string *extra_key = NULL;
 
 	zend_shape_check_result result = zend_check_array_shape(
-		Z_ARRVAL_P(arr), shape, &failed_elem, &failed_val);
+		Z_ARRVAL_P(arr), shape, &failed_elem, &failed_val, &extra_key);
 
 	if (UNEXPECTED(result != SHAPE_OK)) {
-		zend_shape_prop_error(info, result, failed_elem, failed_val);
+		zend_shape_prop_error(info, result, failed_elem, failed_val, extra_key);
 		return false;
 	}
 	return true;
@@ -2330,9 +2378,10 @@ static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_retu
 		zend_array_shape *shape_def = ZEND_ARRAY_SHAPE(shape_type);
 		const zend_array_shape_element *failed_elem;
 		zval *failed_val;
+		zend_string *extra_key = NULL;
 		/* Validate the array against the shape definition */
 		zend_shape_check_result check_result = zend_check_array_shape(
-			Z_ARRVAL_P(arg), shape_def, &failed_elem, &failed_val);
+			Z_ARRVAL_P(arg), shape_def, &failed_elem, &failed_val, &extra_key);
 		result = (check_result == SHAPE_OK);
 		goto done;
 	}

@@ -1526,6 +1526,9 @@ zend_string *zend_type_to_string_resolved(const zend_type type, zend_class_entry
 				zend_string_release(elem_type_str);
 			}
 			smart_str_appendc(&buf, '}');
+			if (shape->is_closed) {
+				smart_str_appendc(&buf, '!');
+			}
 			str = add_type_string(str, smart_str_extract(&buf), /* is_intersection */ false);
 		} else {
 			str = add_type_string(str, ZSTR_KNOWN(ZEND_STR_ARRAY), /* is_intersection */ false);
@@ -7291,10 +7294,11 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 		type.ptr = elem_type;
 		return type;
 	} else if (ast->kind == ZEND_AST_TYPE_ARRAY_SHAPE) {
-		/* array{key: type, ...} */
+		/* array{key: type, ...} or array{key: type, ...}! (closed) */
 		zend_ast *element_list = ast->child[0];
 		uint32_t num_elements = element_list ? zend_ast_get_list(element_list)->children : 0;
 		uint32_t num_required = 0;
+		bool is_closed = (ast->attr != 0);
 
 		/* Validate element count to prevent excessive memory allocation */
 		if (UNEXPECTED(num_elements > ZEND_SHAPE_MAX_ELEMENTS)) {
@@ -7305,6 +7309,7 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 		size_t shape_size = sizeof(zend_array_shape) + num_elements * sizeof(zend_array_shape_element);
 		zend_array_shape *shape = zend_arena_alloc(&CG(arena), shape_size);
 		shape->num_elements = num_elements;
+		shape->is_closed = is_closed;
 
 		if (element_list) {
 			zend_ast_list *list = zend_ast_get_list(element_list);

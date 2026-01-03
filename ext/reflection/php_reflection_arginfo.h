@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: c97b7ea319ee1ecb650ad7adbace3a85b9737dfa */
+ * Stub hash: 06bcdb9967efd568a507d4d36b4e00579e33c60d */
 
 ZEND_BEGIN_ARG_WITH_TENTATIVE_RETURN_TYPE_INFO_EX(arginfo_class_Reflection_getModifierNames, 0, 1, IS_ARRAY, 0)
 	ZEND_ARG_TYPE_INFO(0, modifiers, IS_LONG, 0)
@@ -587,6 +587,8 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_class_ReflectionArrayShapeType_getRequiredElementCount arginfo_class_ReflectionGenerator_getExecutingLine
 
+#define arginfo_class_ReflectionArrayShapeType_isClosed arginfo_class_ReflectionFunctionAbstract_hasTentativeReturnType
+
 #define arginfo_class_ReflectionArrayShapeElement_getName arginfo_class_ReflectionFunction___toString
 
 #define arginfo_class_ReflectionArrayShapeElement_getType arginfo_class_ReflectionArrayType_getElementType
@@ -960,6 +962,7 @@ ZEND_METHOD(ReflectionArrayType, hasKeyType);
 ZEND_METHOD(ReflectionArrayShapeType, getElements);
 ZEND_METHOD(ReflectionArrayShapeType, getElementCount);
 ZEND_METHOD(ReflectionArrayShapeType, getRequiredElementCount);
+ZEND_METHOD(ReflectionArrayShapeType, isClosed);
 ZEND_METHOD(ReflectionArrayShapeElement, getName);
 ZEND_METHOD(ReflectionArrayShapeElement, getType);
 ZEND_METHOD(ReflectionArrayShapeElement, isOptional);
@@ -1307,6 +1310,7 @@ static const zend_function_entry class_ReflectionArrayShapeType_methods[] = {
 	ZEND_ME(ReflectionArrayShapeType, getElements, arginfo_class_ReflectionArrayShapeType_getElements, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionArrayShapeType, getElementCount, arginfo_class_ReflectionArrayShapeType_getElementCount, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionArrayShapeType, getRequiredElementCount, arginfo_class_ReflectionArrayShapeType_getRequiredElementCount, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionArrayShapeType, isClosed, arginfo_class_ReflectionArrayShapeType_isClosed, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
