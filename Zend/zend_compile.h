@@ -125,6 +125,9 @@ typedef struct _zend_typed_array_element {
 	(ZEND_TYPE_IS_ONLY_MASK((elem)->element_type) ? \
 		(uint8_t)ZEND_TYPE_PURE_MASK((elem)->element_type) : 0)
 
+/* Maximum nesting depth for typed array validation (prevents stack overflow) */
+#define ZEND_TYPED_ARRAY_MAX_DEPTH 128
+
 /* Array shape element for array{key: type, key?: type} syntax */
 typedef struct _zend_array_shape_element {
 	zend_string *key;        /* Key name */

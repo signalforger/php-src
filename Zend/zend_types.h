@@ -434,7 +434,7 @@ struct _zend_array {
 				uint8_t    flags,
 				uint8_t    nValidatedElemType,  /* Cached validated element type for array<T> */
 				uint8_t    nIteratorsCount,
-				uint8_t    _unused2)
+				uint8_t    nValidatedKeyType)   /* Cached validated key type for array<K,V> */
 		} v;
 		uint32_t flags;
 	} u;

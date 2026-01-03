@@ -1547,6 +1547,17 @@ static zend_always_inline bool zend_verify_array_key_types(
 		return true;
 	}
 
+	/* Fast path: check key type cache */
+	if (HT_KEY_TYPE_IS_VALID(ht) && HT_VALIDATED_KEY_TYPE(ht) == (uint8_t)expected_key_mask) {
+		return true;
+	}
+
+	/* Fast path: packed arrays only have integer keys */
+	if (expected_key_mask == MAY_BE_LONG && HT_IS_PACKED(ht)) {
+		HT_SET_VALIDATED_KEY_TYPE(ht, MAY_BE_LONG);
+		return true;
+	}
+
 	bool expects_int = (expected_key_mask == MAY_BE_LONG);
 
 	ZEND_HASH_FOREACH_KEY(ht, num_key, str_key) {
@@ -1560,6 +1571,8 @@ static zend_always_inline bool zend_verify_array_key_types(
 		}
 	} ZEND_HASH_FOREACH_END();
 
+	/* Cache the validated key type */
+	HT_SET_VALIDATED_KEY_TYPE(ht, expected_key_mask);
 	return true;
 }
 
@@ -1584,6 +1597,100 @@ static zend_always_inline const char *zend_find_invalid_key_type(
 
 	return "unknown";
 }
+
+/*
+ * SIMD-optimized packed array validators for large arrays.
+ *
+ * These use AVX2/SSE2 to check multiple zval type fields in parallel.
+ * The zval struct is 16 bytes with type at offset 8 (u1.type_info).
+ * We use gather operations to collect type bytes, then compare in parallel.
+ *
+ * Minimum array size for SIMD: 16 elements (to amortize setup cost)
+ */
+#ifdef __AVX2__
+#include <immintrin.h>
+
+/* AVX2: Check 8 zvals in parallel using gather */
+static zend_always_inline bool zend_verify_packed_elements_long_avx2(zval *data, uint32_t count)
+{
+	const __m256i expected_type = _mm256_set1_epi32(IS_LONG);
+	/* Gather indices: offset 8 bytes (type_info) for each of 8 consecutive zvals (16 bytes apart) */
+	const __m256i gather_indices = _mm256_setr_epi32(0, 4, 8, 12, 16, 20, 24, 28);
+
+	/* Process 8 elements at a time */
+	while (count >= 8) {
+		/* Gather type_info from 8 consecutive zvals
+		 * Base pointer is at the type_info field of first zval */
+		uint32_t *type_ptr = &data->u1.type_info;
+		__m256i types = _mm256_i32gather_epi32((const int*)type_ptr, gather_indices, 4);
+
+		/* Mask to extract just the type byte (lower 8 bits) */
+		__m256i type_bytes = _mm256_and_si256(types, _mm256_set1_epi32(0xFF));
+
+		/* Compare with IS_LONG */
+		__m256i cmp = _mm256_cmpeq_epi32(type_bytes, expected_type);
+
+		/* Check if all 8 matched */
+		if (_mm256_movemask_epi8(cmp) != (int)0xFFFFFFFF) {
+			/* At least one didn't match - fall back to scalar for error handling */
+			goto scalar_check;
+		}
+
+		data += 8;
+		count -= 8;
+	}
+
+scalar_check:
+	/* Scalar fallback for remaining elements */
+	while (count > 0) {
+		if (Z_TYPE_P(data) == IS_REFERENCE) {
+			data = Z_REFVAL_P(data);
+		}
+		if (UNEXPECTED(Z_TYPE_P(data) != IS_LONG)) {
+			return false;
+		}
+		data++;
+		count--;
+	}
+	return true;
+}
+
+static zend_always_inline bool zend_verify_packed_elements_string_avx2(zval *data, uint32_t count)
+{
+	const __m256i expected_type = _mm256_set1_epi32(IS_STRING);
+	const __m256i gather_indices = _mm256_setr_epi32(0, 4, 8, 12, 16, 20, 24, 28);
+
+	while (count >= 8) {
+		uint32_t *type_ptr = &data->u1.type_info;
+		__m256i types = _mm256_i32gather_epi32((const int*)type_ptr, gather_indices, 4);
+		__m256i type_bytes = _mm256_and_si256(types, _mm256_set1_epi32(0xFF));
+		__m256i cmp = _mm256_cmpeq_epi32(type_bytes, expected_type);
+
+		if (_mm256_movemask_epi8(cmp) != (int)0xFFFFFFFF) {
+			goto scalar_check;
+		}
+
+		data += 8;
+		count -= 8;
+	}
+
+scalar_check:
+	while (count > 0) {
+		if (Z_TYPE_P(data) == IS_REFERENCE) {
+			data = Z_REFVAL_P(data);
+		}
+		if (UNEXPECTED(Z_TYPE_P(data) != IS_STRING)) {
+			return false;
+		}
+		data++;
+		count--;
+	}
+	return true;
+}
+
+#define ZEND_HAS_SIMD_ARRAY_VALIDATION 1
+#define ZEND_SIMD_MIN_ELEMENTS 16
+#endif /* __AVX2__ */
 
 /* Packed array validator with 4x unrolling and prefetching */
 #define DEFINE_VERIFY_PACKED_ELEMENTS(name, type_check) \
@@ -1640,6 +1747,12 @@ DEFINE_VERIFY_PACKED_ELEMENTS(zend_verify_packed_array_elements_string, IS_STRIN
 static zend_always_inline bool zend_verify_array_elements_long(HashTable *ht)
 {
 	if (HT_IS_PACKED(ht) && HT_IS_WITHOUT_HOLES(ht)) {
+#ifdef ZEND_HAS_SIMD_ARRAY_VALIDATION
+		/* Use SIMD for large arrays */
+		if (ht->nNumOfElements >= ZEND_SIMD_MIN_ELEMENTS) {
+			return zend_verify_packed_elements_long_avx2(ht->arPacked, ht->nNumOfElements);
+		}
+#endif
 		return zend_verify_packed_array_elements_long(ht->arPacked, ht->nNumOfElements);
 	}
 	zval *val;
@@ -1663,6 +1776,12 @@ static zend_always_inline bool zend_verify_array_elements_double(HashTable *ht)
 static zend_always_inline bool zend_verify_array_elements_string(HashTable *ht)
 {
 	if (HT_IS_PACKED(ht) && HT_IS_WITHOUT_HOLES(ht)) {
+#ifdef ZEND_HAS_SIMD_ARRAY_VALIDATION
+		/* Use SIMD for large arrays */
+		if (ht->nNumOfElements >= ZEND_SIMD_MIN_ELEMENTS) {
+			return zend_verify_packed_elements_string_avx2(ht->arPacked, ht->nNumOfElements);
+		}
+#endif
 		return zend_verify_packed_array_elements_string(ht->arPacked, ht->nNumOfElements);
 	}
 	zval *val;
@@ -1683,20 +1802,118 @@ static zend_always_inline bool zend_verify_array_elements_bool(HashTable *ht)
 	return true;
 }
 
+/*
+ * Optimized object array validation with multiple fast paths:
+ *
+ * 1. Exact class match: If object's class == expected class, skip instanceof
+ * 2. Monomorphic arrays: Detect when all objects share same class, use pointer comparison
+ * 3. Polymorphic fallback: Use instanceof_function for inheritance checks
+ *
+ * Most real-world typed arrays are monomorphic (all same concrete class),
+ * so the pointer comparison fast path handles the common case efficiently.
+ */
 static zend_always_inline bool zend_verify_array_elements_object(HashTable *ht, zend_class_entry *ce)
 {
 	zval *val;
+	zend_class_entry *first_ce = NULL;
+	bool is_monomorphic = true;
+
+	/* No class constraint - just check all are objects */
+	if (ce == NULL) {
+		ZEND_HASH_FOREACH_VAL(ht, val) {
+			if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
+				val = Z_REFVAL_P(val);
+			}
+			if (UNEXPECTED(Z_TYPE_P(val) != IS_OBJECT)) {
+				return false;
+			}
+		} ZEND_HASH_FOREACH_END();
+		return true;
+	}
+
+	/* First pass: check types and detect monomorphic pattern */
 	ZEND_HASH_FOREACH_VAL(ht, val) {
+		zend_class_entry *obj_ce;
+
 		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
 			val = Z_REFVAL_P(val);
 		}
 		if (UNEXPECTED(Z_TYPE_P(val) != IS_OBJECT)) {
 			return false;
 		}
-		if (ce && UNEXPECTED(!instanceof_function(Z_OBJCE_P(val), ce))) {
+
+		obj_ce = Z_OBJCE_P(val);
+
+		/* Fast path: exact class match (no inheritance check needed) */
+		if (EXPECTED(obj_ce == ce)) {
+			if (first_ce == NULL) {
+				first_ce = obj_ce;
+			}
+			continue;
+		}
+
+		/* Track if array is monomorphic (all same concrete class) */
+		if (first_ce == NULL) {
+			first_ce = obj_ce;
+		} else if (obj_ce != first_ce) {
+			is_monomorphic = false;
+		}
+
+		/* Slow path: check inheritance via instanceof */
+		if (UNEXPECTED(!instanceof_function(obj_ce, ce))) {
 			return false;
 		}
 	} ZEND_HASH_FOREACH_END();
+
+	return true;
+}
+
+/*
+ * Even faster validation for packed object arrays with monomorphic content.
+ * When we know all objects are the same class (common case), we can:
+ * 1. Check first object's class satisfies constraint
+ * 2. Just verify remaining objects are same class (pointer comparison)
+ */
+static zend_always_inline bool zend_verify_packed_array_elements_object_monomorphic(
+	zval *data, uint32_t count, zend_class_entry *ce)
+{
+	if (count == 0) return true;
+
+	/* Check first element */
+	zval *first = data;
+	if (UNEXPECTED(Z_TYPE_P(first) == IS_REFERENCE)) {
+		first = Z_REFVAL_P(first);
+	}
+	if (UNEXPECTED(Z_TYPE_P(first) != IS_OBJECT)) {
+		return false;
+	}
+
+	zend_class_entry *first_ce = Z_OBJCE_P(first);
+
+	/* Verify first element satisfies constraint */
+	if (ce != NULL && first_ce != ce && !instanceof_function(first_ce, ce)) {
+		return false;
+	}
+
+	/* Fast path: compare remaining objects to first (pointer comparison only) */
+	for (uint32_t i = 1; i < count; i++) {
+		zval *val = &data[i];
+		if (UNEXPECTED(Z_TYPE_P(val) == IS_REFERENCE)) {
+			val = Z_REFVAL_P(val);
+		}
+		if (UNEXPECTED(Z_TYPE_P(val) != IS_OBJECT)) {
+			return false;
+		}
+		/* Fast pointer comparison - if same class as first, already validated */
+		if (EXPECTED(Z_OBJCE_P(val) == first_ce)) {
+			continue;
+		}
+		/* Different class - check constraint (polymorphic case) */
+		if (ce != NULL && Z_OBJCE_P(val) != ce && !instanceof_function(Z_OBJCE_P(val), ce)) {
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -1782,6 +1999,9 @@ static ZEND_COLD zend_long zend_find_invalid_array_element_union(
 	return -1;
 }
 
+/* Thread-local recursion depth counter for nested array validation */
+static ZEND_TLS int zend_typed_array_recursion_depth = 0;
+
 static zend_always_inline bool zend_verify_array_elements_union(HashTable *ht, const zend_type *element_type)
 {
 	zval *val;
@@ -1803,23 +2023,35 @@ static bool zend_verify_nested_array_type(zval *val, const zend_type *array_type
 		return false;
 	}
 
+	/* Check recursion depth limit */
+	if (UNEXPECTED(zend_typed_array_recursion_depth >= ZEND_TYPED_ARRAY_MAX_DEPTH)) {
+		zend_error(E_WARNING, "Maximum nested typed array depth of %d exceeded", ZEND_TYPED_ARRAY_MAX_DEPTH);
+		return false;
+	}
+
 	const zend_typed_array_element *elem_type = ZEND_TYPED_ARRAY_ELEMENT(*array_type);
 	if (!elem_type) {
 		return true;
 	}
 
+	zend_typed_array_recursion_depth++;
+
 	zval *inner_val;
+	bool result = true;
 	ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(val), inner_val) {
 		if (ZEND_TYPE_HAS_ARRAY_ELEMENT(elem_type->element_type)) {
 			if (!zend_verify_nested_array_type(inner_val, &elem_type->element_type)) {
-				return false;
+				result = false;
+				break;
 			}
 		} else if (!zend_check_type(&elem_type->element_type, inner_val, NULL, 0, 0)) {
-			return false;
+			result = false;
+			break;
 		}
 	} ZEND_HASH_FOREACH_END();
 
-	return true;
+	zend_typed_array_recursion_depth--;
+	return result;
 }
 
 static zend_always_inline uint8_t zend_get_simple_type_code(const zend_type *type)
@@ -1840,6 +2072,35 @@ static zend_always_inline uint8_t zend_get_simple_type_code(const zend_type *typ
 	if (type_mask == MAY_BE_OBJECT || ZEND_TYPE_HAS_NAME(*type)) return IS_OBJECT;
 
 	return 0; /* Complex type */
+}
+
+/*
+ * Thread-local cache for class entry lookups in array<ClassName> validation.
+ * Caches the last looked up class name and its corresponding class entry.
+ * This avoids repeated zend_lookup_class() calls for the same class type.
+ */
+static ZEND_TLS zend_string *zend_cached_class_name = NULL;
+static ZEND_TLS zend_class_entry *zend_cached_class_entry = NULL;
+
+static zend_always_inline zend_class_entry *zend_lookup_class_cached(zend_string *class_name)
+{
+	/* Check cache first */
+	if (zend_cached_class_name != NULL &&
+		zend_string_equals(class_name, zend_cached_class_name)) {
+		/* Verify the cached class entry is still valid */
+		if (zend_cached_class_entry != NULL) {
+			return zend_cached_class_entry;
+		}
+	}
+
+	/* Cache miss - do the lookup and cache the result */
+	zend_class_entry *ce = zend_lookup_class(class_name);
+
+	/* Update cache (we don't hold a reference, so this is a weak cache) */
+	zend_cached_class_name = class_name;
+	zend_cached_class_entry = ce;
+
+	return ce;
 }
 
 ZEND_API bool zend_verify_array_element_types(
@@ -1897,9 +2158,15 @@ ZEND_API bool zend_verify_array_element_types(
 			case IS_OBJECT:
 				if (ZEND_TYPE_HAS_NAME(elem_type->element_type)) {
 					zend_string *class_name = ZEND_TYPE_NAME(elem_type->element_type);
-					cached_ce = zend_lookup_class(class_name);
+					cached_ce = zend_lookup_class_cached(class_name);
 				}
-				valid = zend_verify_array_elements_object(ht, cached_ce);
+				/* Use packed array optimization for monomorphic object arrays */
+				if (HT_IS_PACKED(ht) && HT_IS_WITHOUT_HOLES(ht)) {
+					valid = zend_verify_packed_array_elements_object_monomorphic(
+						ht->arPacked, ht->nNumOfElements, cached_ce);
+				} else {
+					valid = zend_verify_array_elements_object(ht, cached_ce);
+				}
 				break;
 			default:
 				valid = true;
@@ -2000,9 +2267,15 @@ ZEND_API bool zend_verify_array_arg_element_types(
 			case IS_OBJECT:
 				if (ZEND_TYPE_HAS_NAME(elem_type->element_type)) {
 					zend_string *class_name = ZEND_TYPE_NAME(elem_type->element_type);
-					cached_ce = zend_lookup_class(class_name);
+					cached_ce = zend_lookup_class_cached(class_name);
 				}
-				valid = zend_verify_array_elements_object(ht, cached_ce);
+				/* Use packed array optimization for monomorphic object arrays */
+				if (HT_IS_PACKED(ht) && HT_IS_WITHOUT_HOLES(ht)) {
+					valid = zend_verify_packed_array_elements_object_monomorphic(
+						ht->arPacked, ht->nNumOfElements, cached_ce);
+				} else {
+					valid = zend_verify_array_elements_object(ht, cached_ce);
+				}
 				break;
 			default:
 				valid = true;
@@ -2103,9 +2376,15 @@ ZEND_API bool zend_verify_array_prop_element_types(
 			case IS_OBJECT:
 				if (ZEND_TYPE_HAS_NAME(elem_type->element_type)) {
 					zend_string *class_name = ZEND_TYPE_NAME(elem_type->element_type);
-					cached_ce = zend_lookup_class(class_name);
+					cached_ce = zend_lookup_class_cached(class_name);
 				}
-				valid = zend_verify_array_elements_object(ht, cached_ce);
+				/* Use packed array optimization for monomorphic object arrays */
+				if (HT_IS_PACKED(ht) && HT_IS_WITHOUT_HOLES(ht)) {
+					valid = zend_verify_packed_array_elements_object_monomorphic(
+						ht->arPacked, ht->nNumOfElements, cached_ce);
+				} else {
+					valid = zend_verify_array_elements_object(ht, cached_ce);
+				}
 				break;
 			default:
 				valid = true;

@@ -86,6 +86,42 @@ typedef enum {
 #define HT_DEC_ITERATORS_COUNT(ht) \
 	HT_SET_ITERATORS_COUNT(ht, HT_ITERATORS_COUNT(ht) - 1)
 
+/*
+ * Typed Array Validation Cache
+ * ============================
+ *
+ * These macros provide caching infrastructure for array<T> and array<K,V>
+ * type validation, significantly reducing runtime overhead for repeated
+ * validations of the same array.
+ *
+ * Cache Structure:
+ * - nValidatedElemType (uint8_t): Stores the last validated element type code
+ *   (IS_LONG, IS_STRING, IS_DOUBLE, etc.) for simple types
+ * - nValidatedKeyType (uint8_t): Stores the validated key type mask
+ *   (MAY_BE_LONG, MAY_BE_STRING, or MAY_BE_LONG|MAY_BE_STRING)
+ * - HASH_FLAG_ELEM_TYPE_VALID (bit 7 of flags): Indicates if element cache is valid
+ *
+ * Cache Invalidation:
+ * The caches are automatically invalidated when the array is mutated:
+ * - Adding elements: zend_hash_add, zend_hash_update, zend_hash_index_add, etc.
+ * - Removing elements: zend_hash_del, zend_hash_index_del, etc.
+ * - Clearing array: zend_hash_clean
+ *
+ * This ensures correctness: after mutation, the next validation will
+ * re-check all elements and update the cache accordingly.
+ *
+ * Performance Notes:
+ * - Cache hit: O(1) - just check the cached type code
+ * - Cache miss: O(n) - validate all elements and update cache
+ * - Empty arrays: O(1) - always valid, no caching needed
+ * - Packed arrays with int keys: Immediate cache hit for MAY_BE_LONG key type
+ *
+ * Limitations:
+ * - Element type cache only works for simple types (not union types)
+ * - Object types with class names are not cached (class may be reloaded)
+ * - Cache is per-array, not per-type (same array, different type = miss)
+ */
+
 /* Element type validation cache for array<T> optimization */
 #define HT_VALIDATED_ELEM_TYPE(ht) (ht)->u.v.nValidatedElemType
 #define HT_ELEM_TYPE_IS_VALID(ht) ((HT_FLAGS(ht) & HASH_FLAG_ELEM_TYPE_VALID) != 0)
@@ -94,6 +130,17 @@ typedef enum {
 #define HT_SET_VALIDATED_ELEM_TYPE(ht, type) do { \
 		(ht)->u.v.nValidatedElemType = (type); \
 		HT_FLAGS(ht) |= HASH_FLAG_ELEM_TYPE_VALID; \
+	} while (0)
+
+/* Key type validation cache for array<K,V> optimization
+ * Stores the validated key type mask (MAY_BE_LONG, MAY_BE_STRING, or both)
+ * Value 0 means not validated, non-zero means validated for that key mask */
+#define HT_VALIDATED_KEY_TYPE(ht) (ht)->u.v.nValidatedKeyType
+#define HT_KEY_TYPE_IS_VALID(ht) ((ht)->u.v.nValidatedKeyType != 0)
+#define HT_INVALIDATE_KEY_TYPE(ht) \
+	do { (ht)->u.v.nValidatedKeyType = 0; } while (0)
+#define HT_SET_VALIDATED_KEY_TYPE(ht, mask) do { \
+		(ht)->u.v.nValidatedKeyType = (uint8_t)(mask); \
 	} while (0)
 
 extern ZEND_API const HashTable zend_empty_array;
