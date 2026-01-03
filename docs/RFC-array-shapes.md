@@ -1,29 +1,88 @@
-# RFC: Array Shapes for PHP
+# RFC: Typed Arrays & Array Shapes for PHP
 
-* Version: 1.0
-* Date: 2024-12-31
+* Version: 1.1
+* Date: 2025-01-03
 * Author: PHP Array Shapes Implementation
 * Status: Implemented (Proof of Concept)
 
 ## Introduction
 
-This RFC proposes adding comprehensive array type syntax to PHP, allowing developers
-to specify the structure and types of array elements at the language level. The
-implementation provides three complementary syntaxes for different use cases.
+This RFC proposes adding **Typed Arrays** and **Array Shapes** to PHP—two complementary
+features that bring type safety to PHP's most versatile data structure. These features
+address different use cases: typed arrays for **collections** and array shapes for
+**structured data**.
 
 ## Motivation
 
-PHP arrays are versatile data structures used for lists, dictionaries, records, and
-complex nested structures. However, the type system currently only allows declaring
-a value as `array` without specifying its internal structure. This leads to:
+PHP arrays serve multiple purposes: lists, dictionaries, records, and complex nested
+structures. However, the type system only allows declaring a value as `array` without
+specifying what it contains:
 
-1. **Runtime errors** - Type mismatches discovered only at runtime
+```php
+function getUsers(): array {
+    // What's in this array? Objects? Associative arrays? Integers?
+    // The type system can't tell you.
+}
+```
+
+This leads to:
+
+1. **Runtime errors** - Type mismatches discovered only during execution
 2. **Poor IDE support** - Limited autocomplete and refactoring capabilities
 3. **Documentation burden** - Developers must rely on PHPDoc annotations
 4. **Maintenance issues** - Changing array structures requires manual updates
 
 Static analysis tools like PHPStan and Psalm have introduced PHPDoc-based array
 shape syntax, demonstrating strong community demand for this feature.
+
+## Two Complementary Features
+
+### Typed Arrays — For Collections
+
+When you have a **list of things of the same type**, use typed arrays:
+
+```php
+// A list of integers
+function getIds(): array<int> {
+    return [1, 2, 3];
+}
+
+// A list of User objects
+function getActiveUsers(): array<User> {
+    return $this->repository->findActive();
+}
+```
+
+### Array Shapes — For Structured Data
+
+When you have **structured data with known keys**, like records from a database or
+responses from an API, use array shapes:
+
+```php
+// Data from a database row
+function getUser(int $id): array{id: int, name: string, email: string} {
+    return $this->db->fetch("SELECT id, name, email FROM users WHERE id = ?", $id);
+}
+
+// Response from an external API
+function getWeather(string $city): array{temp: float, humidity: int} {
+    return json_decode(file_get_contents("https://api.weather.com/$city"), true);
+}
+```
+
+### Why Not Just Use Classes/DTOs?
+
+These features work with **arrays, not objects**. They're designed for situations
+where arrays are the natural choice:
+
+- **Database results** — PDO and other drivers return arrays
+- **JSON APIs** — `json_decode()` returns arrays
+- **Configuration files** — Often loaded as arrays
+- **Legacy code** — Millions of lines of PHP use arrays for structured data
+- **Interoperability** — Arrays are PHP's universal data interchange format
+
+Use objects when you need behavior (methods). Use typed arrays when you're working
+with data.
 
 ## Proposal
 
@@ -154,36 +213,37 @@ if (shape_exists('User')) { ... }
 
 ## Runtime Behavior
 
-### strict_arrays Declare
+### Always-On Validation
 
-Runtime validation is enabled via the `strict_arrays` declare:
+Typed array and array shape validation is **always enabled**. When a type constraint
+is declared, it is enforced at runtime:
 
 ```php
-declare(strict_arrays=1);
-
 function getIds(): array<int> {
     return [1, "two", 3];  // TypeError at runtime
 }
-```
 
-Without the declare, type hints are still parsed and available for reflection
-but not enforced at runtime (similar to `strict_types`).
+function getUser(): array{id: int, name: string} {
+    return ['id' => 1];  // TypeError: missing required key 'name'
+}
+```
 
 ### Error Messages
 
-Type errors provide detailed information:
+Type errors provide detailed, actionable information:
 
 ```php
 // For typed arrays
-TypeError: Return value must be of type array<int>, array given;
-  element at index 1 must be of type int, string given
+TypeError: getIds(): Return value must be of type array<int>,
+           array element at index 1 is string
 
-// For array shapes
-TypeError: Return value must be of type array{id: int, name: string},
-  missing required key 'name'
+// For array shapes - missing key
+TypeError: getUser(): Return value must be of type array{name: string, ...},
+           array given with missing key "name"
 
-TypeError: Return value must be of type array{id: int, name: string},
-  element 'id' must be of type int, string given
+// For array shapes - wrong type
+TypeError: getUser(): Return value must be of type array{id: int, ...},
+           array key "id" is string
 ```
 
 ## Reflection API
@@ -290,9 +350,9 @@ Shape autoloading uses the existing `spl_autoload` infrastructure:
 This proposal is fully backward compatible:
 
 1. New syntax is opt-in via return/parameter type declarations
-2. Runtime validation requires explicit `declare(strict_arrays=1)`
-3. Existing code continues to work unchanged
-4. `shape` is a new keyword only valid at file scope
+2. Existing code without typed array syntax continues to work unchanged
+3. `shape` is a new keyword only valid at file scope for shape declarations
+4. Plain `array` type hints remain valid and unaffected
 
 ## Future Scope
 
@@ -308,8 +368,6 @@ Potential future enhancements (not part of this RFC):
 ### API Response
 
 ```php
-declare(strict_arrays=1);
-
 shape ApiResponse = array{
     success: bool,
     data: mixed,
@@ -330,8 +388,6 @@ function apiSuccess(mixed $data): ApiResponse {
 ### Configuration
 
 ```php
-declare(strict_arrays=1);
-
 shape DatabaseConfig = array{
     host: string,
     port: int,
@@ -354,21 +410,31 @@ function loadConfig(string $path): AppConfig { ... }
 ### Repository Pattern
 
 ```php
-declare(strict_arrays=1);
-
-shape UserData = array{id: int, name: string, email: string, created_at: string};
+shape UserRecord = array{id: int, name: string, email: string, created_at: string};
 
 class UserRepository {
-    public function find(int $id): ?UserData { ... }
-    public function findAll(): array<UserData> { ... }
-    public function save(UserData $user): UserData { ... }
+    // Single record
+    public function find(int $id): ?UserRecord { ... }
+
+    // Collection of records — combining both features
+    public function findAll(): array<UserRecord> { ... }
+
+    public function save(UserRecord $user): UserRecord { ... }
     public function delete(int $id): bool { ... }
 }
 ```
 
 ## Conclusion
 
-This RFC provides a comprehensive solution for typed arrays in PHP, addressing
-a long-standing limitation while maintaining backward compatibility and
-providing flexibility through multiple syntax options. The implementation has
-been tested and all existing PHP tests pass.
+This RFC provides two complementary features for typed arrays in PHP:
+
+- **Typed Arrays** (`array<T>`) for collections of the same type
+- **Array Shapes** (`array{key: type}`) for structured data with known keys
+
+Together, they address a long-standing limitation in PHP's type system while
+maintaining full backward compatibility. These features are designed for working
+with arrays—not as a replacement for objects, but as a complement for the many
+situations where arrays are the right tool: database results, API responses,
+configuration files, and more.
+
+The implementation has been tested and all PHP tests pass.
