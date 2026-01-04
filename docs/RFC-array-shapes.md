@@ -1,9 +1,10 @@
 # RFC: Typed Arrays & Array Shapes for PHP
 
-* Version: 1.2
+* Version: 1.3
 * Date: 2026-01-04
 * Author: PHP Array Shapes Implementation
 * Status: Implemented (Proof of Concept)
+* New in 1.3: Compile-time validation for shape/class cross-inheritance
 * New in 1.2: Shape inheritance (`extends`) and `::shape` syntax
 
 ## Introduction
@@ -387,12 +388,23 @@ shape Child extends Base = array{value: int};  // Override string to int
 
 **Restrictions:**
 
+Shapes and classes are separate concepts and cannot be mixed in inheritance:
+
 - Shapes cannot extend classes
 - Classes cannot extend shapes
 
+These restrictions are enforced at **compile time** with clear error messages:
+
 ```php
+// Shape trying to extend a class
 class MyClass {}
-shape BadShape extends MyClass = array{id: int};  // Error!
+shape BadShape extends MyClass = array{id: int};
+// Fatal error: Shape BadShape cannot extend class MyClass
+
+// Class trying to extend a shape
+shape MyShape = array{id: int, name: string};
+class BadClass extends MyShape {}
+// Fatal error: Class BadClass cannot extend shape MyShape
 ```
 
 #### The `::shape` Syntax
@@ -575,6 +587,20 @@ function getUser(): array{id: int, name: string} { ... }
 - Consistent across all tools
 
 ## Implementation Notes
+
+### Compile-Time Validation
+
+The compiler performs several validations at compile time to catch errors early:
+
+| Error Condition | Error Message |
+|----------------|---------------|
+| Shape extends a class | `Shape X cannot extend class Y` |
+| Class extends a shape | `Class X cannot extend shape Y` |
+| Shape redeclaration | `Cannot redeclare shape X` |
+| `::shape` used on a class | `Cannot use ::shape on class X, use ::class instead` |
+| `::class` used on a shape | `Cannot use ::class on shape X, use ::shape instead` |
+
+These compile-time checks ensure that shape inheritance and naming syntax are used correctly, providing immediate feedback during development rather than runtime errors.
 
 ### Compile-Time Optimization
 
