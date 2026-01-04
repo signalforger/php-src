@@ -10095,10 +10095,150 @@ static zend_type zend_persist_shape_type(zend_type type) /* {{{ */
 }
 /* }}} */
 
+/* Helper function to deep copy a zend_type for persistent storage in shape inheritance */
+static zend_type zend_shape_type_deep_copy(zend_type type) /* {{{ */
+{
+	zend_type result = type;
+
+	if (ZEND_TYPE_HAS_LIST(type)) {
+		/* Copy type list (unions/intersections) */
+		zend_type_list *old_list = ZEND_TYPE_LIST(type);
+		size_t list_size = ZEND_TYPE_LIST_SIZE(old_list->num_types);
+		zend_type_list *new_list = pemalloc(list_size, 1);
+		memcpy(new_list, old_list, list_size);
+
+		/* Update references in copied list elements */
+		for (uint32_t i = 0; i < old_list->num_types; i++) {
+			new_list->types[i] = zend_shape_type_deep_copy(old_list->types[i]);
+		}
+
+		ZEND_TYPE_SET_PTR(result, new_list);
+	} else if (ZEND_TYPE_HAS_NAME(type)) {
+		/* Copy and reference the string */
+		zend_string *name = ZEND_TYPE_NAME(type);
+		ZEND_TYPE_SET_PTR(result, zend_string_dup(name, 1));
+	} else if (ZEND_TYPE_HAS_ARRAY_SHAPE(type)) {
+		/* Deep copy nested array shape */
+		zend_array_shape *old_shape = ZEND_ARRAY_SHAPE(type);
+		size_t shape_size = sizeof(zend_array_shape) + old_shape->num_elements * sizeof(zend_array_shape_element);
+		zend_array_shape *new_shape = pemalloc(shape_size, 1);
+		memcpy(new_shape, old_shape, sizeof(zend_array_shape));
+
+		for (uint32_t i = 0; i < old_shape->num_elements; i++) {
+			new_shape->elements[i].key = zend_string_dup(old_shape->elements[i].key, 1);
+			new_shape->elements[i].type = zend_shape_type_deep_copy(old_shape->elements[i].type);
+			new_shape->elements[i].is_optional = old_shape->elements[i].is_optional;
+		}
+
+		ZEND_TYPE_SET_PTR(result, new_shape);
+	}
+	/* Simple types (int, string, etc.) have no pointers, so shallow copy is fine */
+
+	return result;
+}
+/* }}} */
+
+/* Helper function to merge parent shape elements into child shape */
+static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_type) /* {{{ */
+{
+	/* Both must be array shapes */
+	if (!ZEND_TYPE_HAS_ARRAY_SHAPE(parent_type) || !ZEND_TYPE_HAS_ARRAY_SHAPE(child_type)) {
+		return child_type;  /* If either is not a shape, just return child */
+	}
+
+	zend_array_shape *parent_shape = ZEND_ARRAY_SHAPE(parent_type);
+	zend_array_shape *child_shape = ZEND_ARRAY_SHAPE(child_type);
+
+	/* Calculate total elements (parent + child, with child overriding parent) */
+	uint32_t total_elements = parent_shape->num_elements;
+	uint32_t child_new_elements = 0;
+
+	/* Count new elements in child that don't override parent */
+	for (uint32_t i = 0; i < child_shape->num_elements; i++) {
+		bool found = false;
+		for (uint32_t j = 0; j < parent_shape->num_elements; j++) {
+			if (zend_string_equals(child_shape->elements[i].key, parent_shape->elements[j].key)) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			child_new_elements++;
+		}
+	}
+	total_elements += child_new_elements;
+
+	/* Allocate merged shape */
+	size_t shape_size = sizeof(zend_array_shape) + total_elements * sizeof(zend_array_shape_element);
+	zend_array_shape *merged_shape = pemalloc(shape_size, 1);
+	merged_shape->num_elements = total_elements;
+	merged_shape->is_closed = child_shape->is_closed;
+
+	uint32_t merged_idx = 0;
+	uint32_t num_required = 0;
+
+	/* First, copy parent elements (can be overridden by child) */
+	for (uint32_t i = 0; i < parent_shape->num_elements; i++) {
+		/* Check if child overrides this element */
+		bool overridden = false;
+		for (uint32_t j = 0; j < child_shape->num_elements; j++) {
+			if (zend_string_equals(parent_shape->elements[i].key, child_shape->elements[j].key)) {
+				/* Child overrides - deep copy child's version */
+				merged_shape->elements[merged_idx].key = zend_string_dup(child_shape->elements[j].key, 1);
+				merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(child_shape->elements[j].type);
+				merged_shape->elements[merged_idx].is_optional = child_shape->elements[j].is_optional;
+				if (!child_shape->elements[j].is_optional) {
+					num_required++;
+				}
+				overridden = true;
+				break;
+			}
+		}
+		if (!overridden) {
+			/* Deep copy parent's version */
+			merged_shape->elements[merged_idx].key = zend_string_dup(parent_shape->elements[i].key, 1);
+			merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(parent_shape->elements[i].type);
+			merged_shape->elements[merged_idx].is_optional = parent_shape->elements[i].is_optional;
+			if (!parent_shape->elements[i].is_optional) {
+				num_required++;
+			}
+		}
+		merged_idx++;
+	}
+
+	/* Then add child elements that weren't overriding parent */
+	for (uint32_t i = 0; i < child_shape->num_elements; i++) {
+		bool found = false;
+		for (uint32_t j = 0; j < parent_shape->num_elements; j++) {
+			if (zend_string_equals(child_shape->elements[i].key, parent_shape->elements[j].key)) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			merged_shape->elements[merged_idx].key = zend_string_dup(child_shape->elements[i].key, 1);
+			merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(child_shape->elements[i].type);
+			merged_shape->elements[merged_idx].is_optional = child_shape->elements[i].is_optional;
+			if (!child_shape->elements[i].is_optional) {
+				num_required++;
+			}
+			merged_idx++;
+		}
+	}
+
+	merged_shape->num_required = num_required;
+
+	/* Create merged type */
+	zend_type merged_type = (zend_type) ZEND_TYPE_INIT_PTR_MASK(merged_shape, _ZEND_TYPE_ARRAY_SHAPE_BIT | MAY_BE_ARRAY);
+	return merged_type;
+}
+/* }}} */
+
 static void zend_compile_shape_decl(zend_ast *ast) /* {{{ */
 {
 	zend_ast *name_ast = ast->child[0];
-	zend_ast *type_ast = ast->child[1];
+	zend_ast *parent_ast = ast->child[1];
+	zend_ast *type_ast = ast->child[2];
 	zend_string *name = zend_ast_get_str(name_ast);
 	zend_string *lcname;
 
@@ -10112,17 +10252,58 @@ static void zend_compile_shape_decl(zend_ast *ast) /* {{{ */
 			"Cannot redeclare shape %s", ZSTR_VAL(name));
 	}
 
-	/* Compile the type expression (uses arena allocation) */
-	zend_type arena_type = zend_compile_typename(type_ast);
+	/* Handle inheritance */
+	zend_type final_type;
+	if (parent_ast) {
+		/* Resolve parent shape name */
+		zend_string *parent_name = zend_resolve_class_name_ast(parent_ast);
+		zend_string *parent_lcname = zend_string_tolower(parent_name);
 
-	/* Copy type to persistent memory for shape table storage */
-	zend_type persistent_type = zend_persist_shape_type(arena_type);
+		/* Check that parent is not a class */
+		zend_class_entry *ce = zend_hash_find_ptr(CG(class_table), parent_lcname);
+		if (ce) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Shape %s cannot extend class %s", ZSTR_VAL(name), ZSTR_VAL(parent_name));
+		}
+
+		/* Look up parent shape - first in file-local, then global */
+		zend_shape_entry *parent_shape = NULL;
+		if (FC(shapes)) {
+			parent_shape = zend_hash_find_ptr(FC(shapes), parent_lcname);
+		}
+		if (!parent_shape && CG(shape_table)) {
+			parent_shape = zend_hash_find_ptr(CG(shape_table), parent_lcname);
+		}
+
+		if (!parent_shape) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Shape %s extends undefined shape %s", ZSTR_VAL(name), ZSTR_VAL(parent_name));
+		}
+
+		/* Check for circular inheritance */
+		if (zend_string_equals_ci(parent_lcname, lcname)) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Shape %s cannot extend itself", ZSTR_VAL(name));
+		}
+
+		zend_string_release(parent_name);
+		zend_string_release(parent_lcname);
+
+		/* Compile child type and merge with parent */
+		zend_type child_type = zend_compile_typename(type_ast);
+		zend_type child_persistent = zend_persist_shape_type(child_type);
+		final_type = zend_merge_shape_types(parent_shape->type, child_persistent);
+	} else {
+		/* No inheritance - compile type directly */
+		zend_type arena_type = zend_compile_typename(type_ast);
+		final_type = zend_persist_shape_type(arena_type);
+	}
 
 	/* Create and store the shape entry in global table */
 	zend_shape_entry *entry = pemalloc(sizeof(zend_shape_entry), 1);
 	/* Use dup with persistent=1 since name may be arena-allocated */
 	entry->name = zend_string_dup(name, 1);
-	entry->type = persistent_type;
+	entry->type = final_type;
 
 	zend_hash_add_ptr(CG(shape_table), lcname, entry);
 
@@ -11529,6 +11710,47 @@ static void zend_compile_class_name(znode *result, zend_ast *ast) /* {{{ */
 }
 /* }}} */
 
+static void zend_compile_shape_name(znode *result, zend_ast *ast) /* {{{ */
+{
+	zend_ast *shape_ast = ast->child[0];
+
+	if (shape_ast->kind != ZEND_AST_ZVAL) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"::shape requires a constant shape name, dynamic names are not allowed");
+	}
+
+	/* Resolve the shape name */
+	zend_string *shape_name = zend_resolve_class_name_ast(shape_ast);
+	zend_string *lcname = zend_string_tolower(shape_name);
+
+	/* Look up the shape */
+	zend_shape_entry *shape = NULL;
+	if (FC(shapes)) {
+		shape = zend_hash_find_ptr(FC(shapes), lcname);
+	}
+	if (!shape && CG(shape_table)) {
+		shape = zend_hash_find_ptr(CG(shape_table), lcname);
+	}
+
+	/* If not a shape, check if it's a class - if so, error */
+	if (!shape) {
+		zend_class_entry *ce = zend_hash_find_ptr(CG(class_table), lcname);
+		if (ce) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Cannot use ::shape on class %s, use ::class instead", ZSTR_VAL(shape_name));
+		}
+		/* Not found - might be autoloaded at runtime */
+		/* For now, return the resolved name */
+	}
+
+	/* Return the shape name as a string constant */
+	result->op_type = IS_CONST;
+	ZVAL_STR(&result->u.constant, shape_name);
+
+	zend_string_release(lcname);
+}
+/* }}} */
+
 static zend_op *zend_compile_rope_add_ex(zend_op *opline, znode *result, uint32_t num, znode *elem_node) /* {{{ */
 {
 	if (num == 0) {
@@ -11727,7 +11949,7 @@ static bool zend_is_allowed_in_const_expr(zend_ast_kind kind) /* {{{ */
 		|| kind == ZEND_AST_ARRAY || kind == ZEND_AST_ARRAY_ELEM
 		|| kind == ZEND_AST_UNPACK
 		|| kind == ZEND_AST_CONST || kind == ZEND_AST_CLASS_CONST
-		|| kind == ZEND_AST_CLASS_NAME
+		|| kind == ZEND_AST_CLASS_NAME || kind == ZEND_AST_SHAPE_NAME
 		|| kind == ZEND_AST_MAGIC_CONST || kind == ZEND_AST_COALESCE
 		|| kind == ZEND_AST_CONST_ENUM_INIT
 		|| kind == ZEND_AST_NEW || kind == ZEND_AST_ARG_LIST
@@ -11803,6 +12025,34 @@ static void zend_compile_const_expr_class_name(zend_ast **ast_ptr) /* {{{ */
 		EMPTY_SWITCH_DEFAULT_CASE()
 	}
 }
+
+static void zend_compile_const_expr_shape_name(zend_ast **ast_ptr) /* {{{ */
+{
+	zend_ast *ast = *ast_ptr;
+	zend_ast *shape_ast = ast->child[0];
+	if (shape_ast->kind != ZEND_AST_ZVAL) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"(expression)::shape cannot be used in constant expressions");
+	}
+
+	/* Resolve the shape name and verify it's not a special class keyword */
+	zend_string *shape_name = zend_ast_get_str(shape_ast);
+	uint32_t fetch_type = zend_get_class_fetch_type(shape_name);
+
+	if (fetch_type != ZEND_FETCH_CLASS_DEFAULT) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Cannot use %s::shape - shapes do not have self, parent, or static",
+			ZSTR_VAL(shape_name));
+	}
+
+	/* Resolve to fully qualified name */
+	zend_string *resolved_name = zend_resolve_class_name_ast(shape_ast);
+	zend_string_release(shape_name);
+	zval *zv = zend_ast_get_zval(shape_ast);
+	ZVAL_STR(zv, resolved_name);
+	shape_ast->attr = ZEND_NAME_FQ;
+}
+/* }}} */
 
 static void zend_compile_const_expr_const(zend_ast **ast_ptr) /* {{{ */
 {
@@ -11995,6 +12245,9 @@ static void zend_compile_const_expr(zend_ast **ast_ptr, void *context) /* {{{ */
 			break;
 		case ZEND_AST_CLASS_NAME:
 			zend_compile_const_expr_class_name(ast_ptr);
+			break;
+		case ZEND_AST_SHAPE_NAME:
+			zend_compile_const_expr_shape_name(ast_ptr);
 			break;
 		case ZEND_AST_CONST:
 			zend_compile_const_expr_const(ast_ptr);
@@ -12321,6 +12574,9 @@ static void zend_compile_expr_inner(znode *result, zend_ast *ast) /* {{{ */
 			return;
 		case ZEND_AST_CLASS_NAME:
 			zend_compile_class_name(result, ast);
+			return;
+		case ZEND_AST_SHAPE_NAME:
+			zend_compile_shape_name(result, ast);
 			return;
 		case ZEND_AST_ENCAPS_LIST:
 			zend_compile_encaps_list(result, ast);
@@ -12736,6 +12992,17 @@ static void zend_eval_const_expr(zend_ast **ast_ptr) /* {{{ */
 			if (!zend_try_compile_const_expr_resolve_class_name(&result, class_ast)) {
 				return;
 			}
+			break;
+		}
+		case ZEND_AST_SHAPE_NAME:
+		{
+			/* Shape names are always constant - just resolve the name */
+			zend_ast *shape_ast = ast->child[0];
+			if (shape_ast->kind != ZEND_AST_ZVAL) {
+				return;  /* Dynamic, cannot evaluate at compile time */
+			}
+			zend_string *resolved_name = zend_resolve_class_name_ast(shape_ast);
+			ZVAL_STR(&result, resolved_name);
 			break;
 		}
 		// TODO: We should probably use zend_ast_apply to recursively walk nodes without

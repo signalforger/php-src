@@ -129,6 +129,9 @@ ZEND_API zend_ast * ZEND_FASTCALL zend_ast_create_class_const_or_name(zend_ast *
 	if (zend_string_equals_ci(name_str, ZSTR_KNOWN(ZEND_STR_CLASS))) {
 		zend_string_release(name_str);
 		return zend_ast_create(ZEND_AST_CLASS_NAME, class_name);
+	} else if (zend_string_equals_literal_ci(name_str, "shape")) {
+		zend_string_release(name_str);
+		return zend_ast_create(ZEND_AST_SHAPE_NAME, class_name);
 	} else {
 		return zend_ast_create(ZEND_AST_CLASS_CONST, class_name, name);
 	}

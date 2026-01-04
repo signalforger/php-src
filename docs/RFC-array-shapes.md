@@ -1,9 +1,10 @@
 # RFC: Typed Arrays & Array Shapes for PHP
 
-* Version: 1.1
-* Date: 2025-01-03
+* Version: 1.2
+* Date: 2026-01-04
 * Author: PHP Array Shapes Implementation
 * Status: Implemented (Proof of Concept)
+* New in 1.2: Shape inheritance (`extends`) and `::shape` syntax
 
 ## Introduction
 
@@ -72,17 +73,190 @@ function getWeather(string $city): array{temp: float, humidity: int} {
 
 ### Why Not Just Use Classes/DTOs?
 
-These features work with **arrays, not objects**. They're designed for situations
-where arrays are the natural choice:
+A common question: "With constructor property promotion, classes are almost as concise.
+Why do we need array shapes?"
 
-- **Database results** — PDO and other drivers return arrays
-- **JSON APIs** — `json_decode()` returns arrays
-- **Configuration files** — Often loaded as arrays
-- **Legacy code** — Millions of lines of PHP use arrays for structured data
-- **Interoperability** — Arrays are PHP's universal data interchange format
+#### Side-by-Side Comparison
 
-Use objects when you need behavior (methods). Use typed arrays when you're working
-with data.
+```php
+// With array shapes (this RFC)
+shape UserResponse = array{id: int, name: string, email: ?string};
+
+function getUser(): UserResponse {
+    return ['id' => 1, 'name' => 'Alice', 'email' => null];
+}
+
+// With classes + constructor property promotion
+readonly class UserResponse {
+    public function __construct(
+        public int $id,
+        public string $name,
+        public ?string $email,
+    ) {}
+}
+
+function getUser(): UserResponse {
+    return new UserResponse(id: 1, name: 'Alice', email: null);
+}
+```
+
+At first glance, these look similar. But there are fundamental differences:
+
+#### 1. JSON Serialization
+
+```php
+// Array shapes: direct serialization
+$user = getUser();  // Returns array
+echo json_encode($user);  // {"id":1,"name":"Alice","email":null}
+
+// Classes: requires extra work
+$user = getUser();  // Returns object
+echo json_encode($user);  // {} (empty without JsonSerializable!)
+
+// Must implement JsonSerializable or add toArray():
+readonly class UserResponse implements JsonSerializable {
+    public function __construct(
+        public int $id,
+        public string $name,
+        public ?string $email,
+    ) {}
+
+    public function jsonSerialize(): array {
+        return ['id' => $this->id, 'name' => $this->name, 'email' => $this->email];
+    }
+}
+```
+
+For API responses, you need `json_encode()` to just work. With array shapes, it does.
+With classes, you must implement `JsonSerializable` for **every single DTO**.
+
+#### 2. Working with Existing Data Sources
+
+```php
+// PDO returns arrays
+$row = $pdo->fetch(PDO::FETCH_ASSOC);  // array{id: int, name: string, ...}
+
+// json_decode returns arrays
+$data = json_decode($json, true);  // array{...}
+
+// config files return arrays
+$config = require 'config.php';  // array{...}
+
+// With array shapes: use directly
+function processUser(UserResponse $user): void { ... }
+processUser($row);  // Works!
+
+// With classes: must transform everything
+processUser(new UserResponse(...$row));  // Extra allocation + mapping
+```
+
+Array shapes work with the data you already have. Classes require transformation.
+
+#### 3. Array Functions and Operations
+
+```php
+// Array shapes: native array operations work
+$users = getUsers();  // array<UserResponse>
+$names = array_column($users, 'name');
+$filtered = array_filter($users, fn($u) => $u['id'] > 10);
+$mapped = array_map(fn($u) => $u['name'], $users);
+$merged = [...$user1, ...$user2];  // Spread operator
+['id' => $id, 'name' => $name] = $user;  // Destructuring
+
+// Classes: none of these work directly
+$users = getUsers();  // array<UserResponse>
+$names = array_map(fn($u) => $u->name, $users);  // Must use closures
+$filtered = array_filter($users, fn($u) => $u->id > 10);
+// No spread, no array_column, no destructuring
+```
+
+#### 4. No File/Class Boilerplate
+
+```php
+// Array shapes: define inline or in any file
+function getPoint(): array{x: int, y: int} {
+    return ['x' => 10, 'y' => 20];
+}
+
+// Or define once, use anywhere
+shape Point = array{x: int, y: int};
+
+// Classes: each needs its own file (PSR-4), own namespace, own declaration
+// src/DTO/Point.php
+namespace App\DTO;
+
+readonly class Point {
+    public function __construct(
+        public int $x,
+        public int $y,
+    ) {}
+}
+```
+
+For a complex API with 50+ response types, that's 50+ class files vs one `shapes.php`.
+
+#### 5. Memory and Performance
+
+```php
+// Array: ~400 bytes for small associative array
+$user = ['id' => 1, 'name' => 'Alice', 'email' => 'alice@example.com'];
+
+// Object: ~600+ bytes (object overhead, property table, class entry reference)
+$user = new UserResponse(1, 'Alice', 'alice@example.com');
+```
+
+When processing thousands of records, this adds up. Arrays are PHP's most optimized
+data structure.
+
+#### 6. Framework Expectations
+
+Many frameworks expect arrays:
+
+```php
+// Laravel
+return response()->json($data);  // Expects array
+Model::create($attributes);       // Expects array
+DB::table('users')->insert($data); // Expects array
+
+// Symfony
+return $this->json($data);        // Expects array
+$serializer->serialize($data);    // Handles arrays natively
+```
+
+#### When to Use Classes Instead
+
+Classes are the right choice when you need:
+
+- **Behavior** (methods that operate on the data)
+- **Encapsulation** (private properties, validation in constructor)
+- **Identity** (instanceof checks, type hierarchies)
+- **Mutability control** (readonly properties with controlled modification)
+
+Array shapes are the right choice when you have:
+
+- **Pure data** (no behavior needed)
+- **External data sources** (APIs, databases, config files)
+- **Serialization needs** (JSON responses)
+- **Existing array-based code** (gradual typing of legacy code)
+
+#### Summary
+
+| Feature | Array Shapes | Classes (CPP) |
+|---------|--------------|---------------|
+| JSON serialization | Direct | Requires JsonSerializable |
+| PDO/json_decode | Direct | Requires transformation |
+| array_map/filter | Native | Requires closures |
+| Spread operator | Yes | No |
+| Destructuring | Yes | No |
+| Memory overhead | Minimal | Higher |
+| File per type | No | Yes (PSR-4) |
+| Inline definition | Yes | No |
+| Methods | No | Yes |
+| Private properties | No | Yes |
+
+Array shapes and classes serve different purposes. This RFC doesn't replace classes—
+it provides first-class typing for the millions of lines of PHP that already use
+arrays for data interchange.
 
 ## Proposal
 
@@ -181,6 +355,74 @@ function getUser(int $id): User {
 function processUser(User $user): void {
     echo "Processing: {$user['name']}";
 }
+```
+
+#### Shape Inheritance
+
+Shapes can extend other shapes using the `extends` keyword. The child shape
+inherits all properties from the parent and can add new ones or override existing ones:
+
+```php
+shape BaseEntity = array{id: int, created_at: string};
+shape User extends BaseEntity = array{name: string, email: string};
+shape Admin extends User = array{role: string, permissions: array<string>};
+
+// User has: id, created_at, name, email
+// Admin has: id, created_at, name, email, role, permissions
+```
+
+Inheritance is resolved at compile time (flattened), so there's no runtime
+overhead. The child shape contains all properties from the entire inheritance chain.
+
+**Property Override:**
+
+Child shapes can override parent properties with a different type:
+
+```php
+shape Base = array{value: string};
+shape Child extends Base = array{value: int};  // Override string to int
+
+// Child's 'value' is now int, not string
+```
+
+**Restrictions:**
+
+- Shapes cannot extend classes
+- Classes cannot extend shapes
+
+```php
+class MyClass {}
+shape BadShape extends MyClass = array{id: int};  // Error!
+```
+
+#### The `::shape` Syntax
+
+Similar to `::class` for classes, shapes support the `::shape` syntax to get
+the fully qualified name of a shape:
+
+```php
+shape UserShape = array{id: int, name: string};
+
+echo UserShape::shape;  // "UserShape"
+```
+
+With namespaces:
+
+```php
+namespace App\Types;
+
+shape UserShape = array{id: int, name: string};
+
+echo UserShape::shape;  // "App\Types\UserShape"
+```
+
+This is useful for logging, debugging, and working with shape names dynamically.
+
+**Note:** Using `::shape` on a class results in a compile error:
+
+```php
+class MyClass {}
+echo MyClass::shape;  // Error: Cannot use ::shape on class MyClass, use ::class instead
 ```
 
 #### Shape Autoloading
@@ -294,7 +536,15 @@ shape_element:
   ;
 
 shape_declaration:
-    'shape' T_STRING '=' array_type ';'
+    'shape' T_STRING shape_extends? '=' array_type ';'
+  ;
+
+shape_extends:
+    'extends' name                               // shape inheritance
+  ;
+
+shape_name_access:
+    name '::' 'shape'                            // MyShape::shape
   ;
 ```
 
@@ -360,8 +610,10 @@ Potential future enhancements (not part of this RFC):
 
 1. **Class property types**: `public User $user;`
 2. **Readonly shapes**: Immutable array structures
-3. **Shape inheritance**: `shape Admin extends User`
-4. **Generic shapes**: `shape Result<T> = array{success: bool, data: T}`
+3. **Generic shapes**: `shape Result<T> = array{success: bool, data: T}`
+
+**Note:** Shape inheritance (`shape Admin extends User`) and the `::shape` syntax
+are now implemented and documented above.
 
 ## Examples
 
