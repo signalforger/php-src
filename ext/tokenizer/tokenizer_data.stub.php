@@ -404,6 +404,11 @@ const T_INTERFACE = UNKNOWN;
 const T_ENUM = UNKNOWN;
 /**
  * @var int
+ * @cvalue T_SHAPE
+ */
+const T_SHAPE = UNKNOWN;
+/**
+ * @var int
  * @cvalue T_EXTENDS
  */
 const T_EXTENDS = UNKNOWN;
@@ -427,6 +432,11 @@ const T_LIST = UNKNOWN;
  * @cvalue T_ARRAY
  */
 const T_ARRAY = UNKNOWN;
+/**
+ * @var int
+ * @cvalue T_ARRAY_SHAPE_START
+ */
+const T_ARRAY_SHAPE_START = UNKNOWN;
 /**
  * @var int
  * @cvalue T_CALLABLE

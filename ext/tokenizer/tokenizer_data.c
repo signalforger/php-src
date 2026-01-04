@@ -105,11 +105,13 @@ char *get_token_type_name(int token_type)
 		case T_TRAIT: return "T_TRAIT";
 		case T_INTERFACE: return "T_INTERFACE";
 		case T_ENUM: return "T_ENUM";
+		case T_SHAPE: return "T_SHAPE";
 		case T_EXTENDS: return "T_EXTENDS";
 		case T_IMPLEMENTS: return "T_IMPLEMENTS";
 		case T_NAMESPACE: return "T_NAMESPACE";
 		case T_LIST: return "T_LIST";
 		case T_ARRAY: return "T_ARRAY";
+		case T_ARRAY_SHAPE_START: return "T_ARRAY_SHAPE_START";
 		case T_CALLABLE: return "T_CALLABLE";
 		case T_LINE: return "T_LINE";
 		case T_FILE: return "T_FILE";

@@ -9598,6 +9598,21 @@ static void zend_compile_class_decl(znode *result, zend_ast *ast, bool toplevel)
 	if (extends_ast) {
 		ce->parent_name =
 			zend_resolve_const_class_name_reference(extends_ast, "class name");
+
+		/* Check that parent is not a shape - classes cannot extend shapes */
+		zend_string *parent_lcname = zend_string_tolower(ce->parent_name);
+		zend_shape_entry *parent_shape = NULL;
+		if (FC(shapes)) {
+			parent_shape = zend_hash_find_ptr(FC(shapes), parent_lcname);
+		}
+		if (!parent_shape && CG(shape_table)) {
+			parent_shape = zend_hash_find_ptr(CG(shape_table), parent_lcname);
+		}
+		zend_string_release(parent_lcname);
+		if (parent_shape) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Class %s cannot extend shape %s", ZSTR_VAL(name), ZSTR_VAL(ce->parent_name));
+		}
 	}
 
 	CG(active_class_entry) = ce;
