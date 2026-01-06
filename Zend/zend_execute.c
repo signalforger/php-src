@@ -2460,23 +2460,34 @@ static zend_always_inline zend_shape_check_result zend_check_array_shape(
 	/* For closed shapes, check that no extra keys exist */
 	if (UNEXPECTED(shape->is_closed)) {
 		if (zend_hash_num_elements(ht) != shape->num_elements) {
+			/* Use cached expected_keys hash table for O(1) lookup if available */
+			HashTable *expected_keys = shape->expected_keys;
+			HashTable local_keys;
+
+			/* Fallback to building temporary hash if cache is not available (arena shapes) */
+			if (!expected_keys) {
+				zend_hash_init(&local_keys, shape->num_elements, NULL, NULL, 0);
+				for (uint32_t i = 0; i < shape->num_elements; i++) {
+					zend_hash_add_empty_element(&local_keys, shape->elements[i].key);
+				}
+				expected_keys = &local_keys;
+			}
+
 			/* Find the first extra key for error message */
 			zend_string *key;
 			ZEND_HASH_FOREACH_STR_KEY(ht, key) {
-				if (key) {
-					bool found = false;
-					for (uint32_t i = 0; i < shape->num_elements; i++) {
-						if (zend_string_equals(key, shape->elements[i].key)) {
-							found = true;
-							break;
-						}
+				if (key && !zend_hash_exists(expected_keys, key)) {
+					*extra_key = key;
+					if (expected_keys == &local_keys) {
+						zend_hash_destroy(&local_keys);
 					}
-					if (!found) {
-						*extra_key = key;
-						return SHAPE_EXTRA_KEY;
-					}
+					return SHAPE_EXTRA_KEY;
 				}
 			} ZEND_HASH_FOREACH_END();
+
+			if (expected_keys == &local_keys) {
+				zend_hash_destroy(&local_keys);
+			}
 		}
 	}
 
@@ -2616,8 +2627,20 @@ ZEND_API bool zend_verify_array_prop_shape(
 
 /* ZEND_SHAPE_MAX_RECURSION_DEPTH is defined in zend_compile.h */
 
-/* Thread-local recursion depth counter for shape validation */
+/* Thread-local recursion depth counter for shape validation.
+ * SAFETY: This counter is incremented before validation and decremented after.
+ * The code between increment and decrement must NOT throw exceptions or longjmp.
+ * Currently safe because: zend_check_array_shape, zend_check_type, and hash
+ * iteration all return values rather than throwing. If future modifications
+ * add exception-throwing code, use zend_try/zend_catch for cleanup. */
 ZEND_TLS int zend_shape_recursion_depth = 0;
+
+/* Reset shape recursion depth - called at request startup as defensive measure */
+ZEND_API void zend_reset_shape_recursion_depth(void)
+{
+	zend_shape_recursion_depth = 0;
+	zend_typed_array_recursion_depth = 0;
+}
 
 /* Check if a type name is actually a shape and validate accordingly */
 static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_return_type ZEND_ATTRIBUTE_UNUSED)
@@ -2626,7 +2649,8 @@ static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_retu
 		return false;
 	}
 
-	/* Check for excessive recursion depth (circular shape references) */
+	/* Check for excessive recursion depth (circular shape references).
+	 * This check happens BEFORE incrementing to avoid counter imbalance on error. */
 	if (UNEXPECTED(zend_shape_recursion_depth >= ZEND_SHAPE_MAX_RECURSION_DEPTH)) {
 		zend_error_noreturn(E_ERROR,
 			"Maximum shape nesting level of %d exceeded, possible circular reference",
@@ -2645,7 +2669,8 @@ static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_retu
 		return false;  /* Shapes require arrays */
 	}
 
-	/* Track recursion depth to detect circular references */
+	/* Track recursion depth to detect circular references.
+	 * All code paths after this MUST go through 'done' label to decrement. */
 	zend_shape_recursion_depth++;
 	bool result = false;
 

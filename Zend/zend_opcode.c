@@ -121,6 +121,12 @@ ZEND_API void zend_type_release(zend_type type, bool persistent) {
 	} else if (ZEND_TYPE_HAS_NAME(type)) {
 		zend_string_release(ZEND_TYPE_NAME(type));
 	}
+	/* Note: Array shapes and typed arrays are NOT freed here.
+	 * They are either:
+	 * 1. Arena-allocated (inline shapes like array{x: int}) - freed by arena cleanup
+	 * 2. Shape-table-owned (named shapes like MyShape) - freed by zend_shape_dtor
+	 * Freeing here would cause double-free since function arg_info shares
+	 * the same pointer as shape table entries for named shapes. */
 }
 
 void zend_free_internal_arg_info(zend_internal_function *function) {

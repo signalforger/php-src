@@ -201,11 +201,61 @@ array{id: int, name: string}   // Required keys
 array{id: int, email?: string} // Optional key (may be absent)
 array{data: ?string}           // Nullable value (can be null)
 array{user: array{id: int}}    // Nested shapes
+array{id: int, name: string}!  // Closed shape (no extra keys allowed)
 
 // Shape type aliases — for reusability
 shape User = array{id: int, name: string};
 shape Point = array{x: int, y: int};
 shape Config = array{debug: bool, cache?: int};
+
+// Shape inheritance
+shape BaseUser = array{id: int, name: string};
+shape AdminUser extends BaseUser = array{role: string, permissions: array<string>};
+```
+
+### Shape Inheritance
+
+Shapes support single inheritance with type covariance:
+
+```php
+shape Entity = array{id: int, created_at: string};
+shape User extends Entity = array{name: string, email: string};
+shape Admin extends User = array{role: string, permissions: array<string>};
+
+// Admin inherits all fields: id, created_at, name, email, role, permissions
+function getAdmin(): Admin {
+    return [
+        'id' => 1,
+        'created_at' => '2024-01-01',
+        'name' => 'Alice',
+        'email' => 'alice@example.com',
+        'role' => 'superadmin',
+        'permissions' => ['read', 'write', 'delete']
+    ];
+}
+```
+
+**Covariance rules:**
+- Child shapes can narrow parent types (e.g., `string|int` → `string`)
+- Child shapes cannot widen types (e.g., `string` → `int` is rejected)
+- Child shapes can make optional properties required
+- Child shapes cannot make required properties optional
+
+### Closed Shapes
+
+By default, shapes are "open" — they allow extra keys beyond what's defined. Use the `!` suffix for closed shapes that reject extra keys:
+
+```php
+// Open shape (default) — extra keys allowed
+function getUser(): array{id: int, name: string} {
+    return ['id' => 1, 'name' => 'Alice', 'extra' => 'allowed'];  // OK
+}
+
+// Closed shape — no extra keys allowed
+function getStrictUser(): array{id: int, name: string}! {
+    return ['id' => 1, 'name' => 'Alice', 'extra' => 'forbidden'];
+    // TypeError: unexpected extra key "extra"
+}
 ```
 
 ### Error Messages
@@ -254,9 +304,13 @@ function getUser(): UserRecord { ... }
 - [x] Union types: `array<int|string>`
 - [x] Nested structures: `array<array<int>>`, `array{user: array{id: int}}`
 - [x] Shape type aliases: `shape Name = array{...}`
+- [x] Shape inheritance: `shape Child extends Parent = array{...}`
+- [x] Type covariance validation for shape inheritance
+- [x] Closed shapes: `array{...}!` (reject extra keys)
 - [x] Shape autoloading via `spl_autoload_register()`
 - [x] Reflection API support (`ReflectionArrayType`, `ReflectionArrayShapeType`)
 - [x] Runtime validation with detailed error messages
+- [x] Performance optimizations (string interning, cached key lookups)
 
 ---
 

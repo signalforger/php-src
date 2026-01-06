@@ -937,6 +937,11 @@ static void zend_shape_type_free(zend_type type) /* {{{ */
 			/* Recursively free element types */
 			zend_shape_type_free(shape->elements[i].type);
 		}
+		/* Free cached expected_keys hash table for closed shapes */
+		if (shape->expected_keys) {
+			zend_hash_destroy(shape->expected_keys);
+			pefree(shape->expected_keys, 1);
+		}
 		pefree(shape, 1);
 	} else if ((type.type_mask & (1u << IS_ARRAY)) && type.ptr != NULL
 			&& !ZEND_TYPE_IS_COMPLEX(type)) {

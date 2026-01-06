@@ -1,26 +1,12 @@
 --TEST--
-Shape inheritance - child overrides parent property type
+Shape inheritance - invalid covariance (widening type error)
 --XLEAK--
 --FILE--
 <?php
 
 shape Base = array{id: int, value: string};
-shape Child extends Base = array{value: int};  // Override value from string to int
+shape Child extends Base = array{value: int};  // Invalid: string -> int is not covariant
 
-function test(Child $data): void {
-    var_dump($data);
-}
-
-// value is now int, not string
-test(['id' => 1, 'value' => 42]);
-
-echo "Done\n";
 ?>
---EXPECT--
-array(2) {
-  ["id"]=>
-  int(1)
-  ["value"]=>
-  int(42)
-}
-Done
+--EXPECTF--
+Fatal error: Shape Child property 'value' type int is not compatible with parent type string in %s on line %d

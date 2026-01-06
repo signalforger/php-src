@@ -129,6 +129,9 @@ void init_executor(void) /* {{{ */
 {
 	zend_init_fpu();
 
+	/* Reset shape/typed array recursion counters (defensive measure) */
+	zend_reset_shape_recursion_depth();
+
 	ZVAL_NULL(&EG(uninitialized_zval));
 	ZVAL_ERROR(&EG(error_zval));
 /* destroys stack frame, therefore makes core dumps worthless */
@@ -1297,11 +1300,12 @@ ZEND_API zend_class_entry *zend_lookup_class(zend_string *name) /* {{{ */
 }
 /* }}} */
 
-ZEND_API zend_shape_entry *zend_lookup_shape_ex(zend_string *name, zend_string *lc_name, uint32_t flags ZEND_ATTRIBUTE_UNUSED) /* {{{ */
+ZEND_API zend_shape_entry *zend_lookup_shape_ex(zend_string *name, zend_string *lc_name, uint32_t flags) /* {{{ */
 {
 	zval *zv;
 	zend_string *lookup_name;
 	bool free_lookup_name = false;
+	zend_shape_entry *shape = NULL;
 
 	if (lc_name) {
 		lookup_name = lc_name;
@@ -1320,16 +1324,68 @@ ZEND_API zend_shape_entry *zend_lookup_shape_ex(zend_string *name, zend_string *
 	}
 
 	zv = zend_hash_find(EG(shape_table), lookup_name);
+	if (zv) {
+		shape = (zend_shape_entry*)Z_PTR_P(zv);
+		goto done;
+	}
 
+	/* Shape not found - try autoloading if allowed */
+	/* The compiler is not-reentrant. Make sure we autoload only during run-time. */
+	if ((flags & ZEND_FETCH_CLASS_NO_AUTOLOAD) || zend_is_compiling()) {
+		goto done;
+	}
+
+	if (!zend_autoload) {
+		goto done;
+	}
+
+	/* Use the same in_autoload hash as classes to prevent recursive autoloading */
+	if (EG(in_autoload) == NULL) {
+		ALLOC_HASHTABLE(EG(in_autoload));
+		zend_hash_init(EG(in_autoload), 8, NULL, NULL, 0);
+	}
+
+	if (zend_hash_add_empty_element(EG(in_autoload), lookup_name) == NULL) {
+		/* Already autoloading this shape */
+		goto done;
+	}
+
+	{
+		zend_string *autoload_name;
+		if (ZSTR_VAL(name)[0] == '\\') {
+			autoload_name = zend_string_init(ZSTR_VAL(name) + 1, ZSTR_LEN(name) - 1, 0);
+		} else {
+			autoload_name = zend_string_copy(name);
+		}
+
+		zend_string *previous_filename = EG(filename_override);
+		zend_long previous_lineno = EG(lineno_override);
+		EG(filename_override) = NULL;
+		EG(lineno_override) = -1;
+		zend_exception_save();
+		/* Call the autoloader - it will include the file defining the shape */
+		zend_autoload(autoload_name, lookup_name);
+		zend_exception_restore();
+		EG(filename_override) = previous_filename;
+		EG(lineno_override) = previous_lineno;
+
+		zend_string_release_ex(autoload_name, 0);
+	}
+
+	zend_hash_del(EG(in_autoload), lookup_name);
+
+	/* Check if the shape was defined by the autoloaded file */
+	zv = zend_hash_find(EG(shape_table), lookup_name);
+	if (zv) {
+		shape = (zend_shape_entry*)Z_PTR_P(zv);
+	}
+
+done:
 	if (free_lookup_name) {
 		zend_string_release_ex(lookup_name, 0);
 	}
 
-	if (zv) {
-		return (zend_shape_entry*)Z_PTR_P(zv);
-	}
-
-	return NULL;
+	return shape;
 }
 /* }}} */
 

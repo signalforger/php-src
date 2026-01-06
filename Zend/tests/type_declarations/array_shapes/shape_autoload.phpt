@@ -1,7 +1,5 @@
 --TEST--
 Shape type alias autoloading
---XFAIL--
-Shape autoloading via spl_autoload is not yet implemented in zend_lookup_shape_ex
 --XLEAK--
 --FILE--
 <?php

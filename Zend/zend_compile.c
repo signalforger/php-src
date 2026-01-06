@@ -7310,6 +7310,7 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 		zend_array_shape *shape = zend_arena_alloc(&CG(arena), shape_size);
 		shape->num_elements = num_elements;
 		shape->is_closed = is_closed;
+		shape->expected_keys = NULL;  /* Will be built during persistence for closed shapes */
 
 		if (element_list) {
 			zend_ast_list *list = zend_ast_get_list(element_list);
@@ -10027,6 +10028,21 @@ static void zend_compile_const_decl(zend_ast *ast) /* {{{ */
 }
 /* }}}*/
 
+/* Persist a shape key string using interning when possible.
+ * Tries to find an existing interned string for common keys like "id", "name", etc.
+ * This saves memory and enables fast pointer comparison. */
+static zend_string *zend_persist_shape_key(zend_string *key) /* {{{ */
+{
+	zend_string *interned = zend_string_init_existing_interned(
+		ZSTR_VAL(key), ZSTR_LEN(key), 1);
+	if (interned) {
+		return interned;
+	}
+	/* No existing interned string - create persistent copy */
+	return zend_string_dup(key, 1);
+}
+/* }}} */
+
 /* Copy type data to persistent memory for shape storage.
  * This is needed because zend_compile_typename uses arena allocation,
  * but shapes are stored in a persistent table that survives across requests. */
@@ -10051,12 +10067,22 @@ static zend_type zend_persist_shape_type(zend_type type) /* {{{ */
 		/* Persist each element's key and type */
 		for (uint32_t i = 0; i < persistent_shape->num_elements; i++) {
 			if (persistent_shape->elements[i].key) {
-				/* Use dup with persistent=1 since arena strings will be freed */
 				persistent_shape->elements[i].key =
-					zend_string_dup(persistent_shape->elements[i].key, 1);
+					zend_persist_shape_key(persistent_shape->elements[i].key);
 			}
 			persistent_shape->elements[i].type =
 				zend_persist_shape_type(persistent_shape->elements[i].type);
+		}
+
+		/* Build cached hash table of expected keys for closed shapes */
+		if (persistent_shape->is_closed && persistent_shape->num_elements > 0) {
+			persistent_shape->expected_keys = pemalloc(sizeof(HashTable), 1);
+			zend_hash_init(persistent_shape->expected_keys, persistent_shape->num_elements, NULL, NULL, 1);
+			for (uint32_t i = 0; i < persistent_shape->num_elements; i++) {
+				zend_hash_add_empty_element(persistent_shape->expected_keys, persistent_shape->elements[i].key);
+			}
+		} else {
+			persistent_shape->expected_keys = NULL;
 		}
 
 		result.ptr = persistent_shape;
@@ -10153,8 +10179,44 @@ static zend_type zend_shape_type_deep_copy(zend_type type) /* {{{ */
 }
 /* }}} */
 
+/* Check if child type is a valid override for parent type (covariance for shape elements).
+ * Returns true if valid, false if the override would violate type safety.
+ * For simple types: child must be a subset of parent (can narrow, cannot widen).
+ * For complex types: we allow the override (could be enhanced with full type checking). */
+static bool zend_shape_type_is_covariant(zend_type child_type, zend_type parent_type) /* {{{ */
+{
+	/* If parent is not set, any child type is valid */
+	if (!ZEND_TYPE_IS_SET(parent_type)) {
+		return true;
+	}
+
+	/* If child is not set but parent is, that's invalid */
+	if (!ZEND_TYPE_IS_SET(child_type)) {
+		return false;
+	}
+
+	/* For simple type masks: child type mask must be a subset of parent */
+	uint32_t child_mask = ZEND_TYPE_PURE_MASK(child_type);
+	uint32_t parent_mask = ZEND_TYPE_PURE_MASK(parent_type);
+
+	/* Child cannot add types that parent doesn't have */
+	uint32_t added_types = child_mask & ~parent_mask;
+	if (added_types != 0) {
+		/* Exception: if parent allows 'mixed', child can be anything */
+		if (parent_mask == MAY_BE_ANY) {
+			return true;
+		}
+		return false;
+	}
+
+	/* For complex types (classes, shapes), we'd need more sophisticated checking.
+	 * For now, allow if the type masks are compatible. */
+	return true;
+}
+/* }}} */
+
 /* Helper function to merge parent shape elements into child shape */
-static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_type) /* {{{ */
+static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_type, zend_string *shape_name) /* {{{ */
 {
 	/* Both must be array shapes */
 	if (!ZEND_TYPE_HAS_ARRAY_SHAPE(parent_type) || !ZEND_TYPE_HAS_ARRAY_SHAPE(child_type)) {
@@ -10163,6 +10225,34 @@ static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_t
 
 	zend_array_shape *parent_shape = ZEND_ARRAY_SHAPE(parent_type);
 	zend_array_shape *child_shape = ZEND_ARRAY_SHAPE(child_type);
+
+	/* First pass: validate overrides before allocating merged shape */
+	for (uint32_t i = 0; i < child_shape->num_elements; i++) {
+		for (uint32_t j = 0; j < parent_shape->num_elements; j++) {
+			if (zend_string_equals(child_shape->elements[i].key, parent_shape->elements[j].key)) {
+				/* Child is overriding parent element - validate */
+
+				/* Rule 1: Cannot make required property optional */
+				if (!parent_shape->elements[j].is_optional && child_shape->elements[i].is_optional) {
+					zend_error_noreturn(E_COMPILE_ERROR,
+						"Shape %s cannot make required property '%s' optional (inherited as required from parent)",
+						ZSTR_VAL(shape_name), ZSTR_VAL(child_shape->elements[i].key));
+				}
+
+				/* Rule 2: Child type must be covariant (subset of parent type) */
+				if (!zend_shape_type_is_covariant(child_shape->elements[i].type, parent_shape->elements[j].type)) {
+					zend_string *parent_type_str = zend_type_to_string(parent_shape->elements[j].type);
+					zend_string *child_type_str = zend_type_to_string(child_shape->elements[i].type);
+					zend_error_noreturn(E_COMPILE_ERROR,
+						"Shape %s property '%s' type %s is not compatible with parent type %s",
+						ZSTR_VAL(shape_name), ZSTR_VAL(child_shape->elements[i].key),
+						ZSTR_VAL(child_type_str), ZSTR_VAL(parent_type_str));
+				}
+
+				break;
+			}
+		}
+	}
 
 	/* Calculate total elements (parent + child, with child overriding parent) */
 	uint32_t total_elements = parent_shape->num_elements;
@@ -10198,8 +10288,8 @@ static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_t
 		bool overridden = false;
 		for (uint32_t j = 0; j < child_shape->num_elements; j++) {
 			if (zend_string_equals(parent_shape->elements[i].key, child_shape->elements[j].key)) {
-				/* Child overrides - deep copy child's version */
-				merged_shape->elements[merged_idx].key = zend_string_dup(child_shape->elements[j].key, 1);
+				/* Child overrides - persist child's version */
+				merged_shape->elements[merged_idx].key = zend_persist_shape_key(child_shape->elements[j].key);
 				merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(child_shape->elements[j].type);
 				merged_shape->elements[merged_idx].is_optional = child_shape->elements[j].is_optional;
 				if (!child_shape->elements[j].is_optional) {
@@ -10210,8 +10300,8 @@ static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_t
 			}
 		}
 		if (!overridden) {
-			/* Deep copy parent's version */
-			merged_shape->elements[merged_idx].key = zend_string_dup(parent_shape->elements[i].key, 1);
+			/* Persist parent's version */
+			merged_shape->elements[merged_idx].key = zend_persist_shape_key(parent_shape->elements[i].key);
 			merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(parent_shape->elements[i].type);
 			merged_shape->elements[merged_idx].is_optional = parent_shape->elements[i].is_optional;
 			if (!parent_shape->elements[i].is_optional) {
@@ -10231,7 +10321,7 @@ static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_t
 			}
 		}
 		if (!found) {
-			merged_shape->elements[merged_idx].key = zend_string_dup(child_shape->elements[i].key, 1);
+			merged_shape->elements[merged_idx].key = zend_persist_shape_key(child_shape->elements[i].key);
 			merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(child_shape->elements[i].type);
 			merged_shape->elements[merged_idx].is_optional = child_shape->elements[i].is_optional;
 			if (!child_shape->elements[i].is_optional) {
@@ -10242,6 +10332,17 @@ static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_t
 	}
 
 	merged_shape->num_required = num_required;
+
+	/* Build cached hash table of expected keys for closed shapes */
+	if (merged_shape->is_closed && merged_shape->num_elements > 0) {
+		merged_shape->expected_keys = pemalloc(sizeof(HashTable), 1);
+		zend_hash_init(merged_shape->expected_keys, merged_shape->num_elements, NULL, NULL, 1);
+		for (uint32_t i = 0; i < merged_shape->num_elements; i++) {
+			zend_hash_add_empty_element(merged_shape->expected_keys, merged_shape->elements[i].key);
+		}
+	} else {
+		merged_shape->expected_keys = NULL;
+	}
 
 	/* Create merged type */
 	zend_type merged_type = (zend_type) ZEND_TYPE_INIT_PTR_MASK(merged_shape, _ZEND_TYPE_ARRAY_SHAPE_BIT | MAY_BE_ARRAY);
@@ -10307,7 +10408,7 @@ static void zend_compile_shape_decl(zend_ast *ast) /* {{{ */
 		/* Compile child type and merge with parent */
 		zend_type child_type = zend_compile_typename(type_ast);
 		zend_type child_persistent = zend_persist_shape_type(child_type);
-		final_type = zend_merge_shape_types(parent_shape->type, child_persistent);
+		final_type = zend_merge_shape_types(parent_shape->type, child_persistent, name);
 	} else {
 		/* No inheritance - compile type directly */
 		zend_type arena_type = zend_compile_typename(type_ast);

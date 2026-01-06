@@ -52,6 +52,7 @@ ZEND_API bool zend_is_valid_class_name(zend_string *name);
 ZEND_API zend_class_entry *zend_lookup_class(zend_string *name);
 ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *lcname, uint32_t flags);
 ZEND_API zend_shape_entry *zend_lookup_shape(zend_string *name);
+ZEND_API void zend_reset_shape_recursion_depth(void);
 ZEND_API zend_shape_entry *zend_lookup_shape_ex(zend_string *name, zend_string *lcname, uint32_t flags);
 ZEND_API zend_class_entry *zend_get_called_scope(zend_execute_data *ex);
 ZEND_API zend_object *zend_get_this_object(zend_execute_data *ex);

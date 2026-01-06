@@ -140,6 +140,7 @@ typedef struct _zend_array_shape {
 	uint32_t num_elements;               /* Number of shape elements */
 	uint32_t num_required;               /* Number of required (non-optional) elements */
 	bool is_closed;                      /* If true, no extra keys allowed (array{...}!) */
+	HashTable *expected_keys;            /* Cached hash set of keys for closed shapes (NULL for open shapes) */
 	zend_array_shape_element elements[]; /* Flexible array member */
 } zend_array_shape;
 
