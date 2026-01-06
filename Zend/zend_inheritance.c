@@ -66,6 +66,11 @@ static void ZEND_COLD emit_incompatible_method_error(
 
 static void zend_type_copy_ctor(zend_type *const type, bool use_arena, bool persistent);
 
+/* Forward declaration for recursive calls */
+ZEND_API inheritance_status zend_perform_covariant_type_check(
+	zend_class_entry *fe_scope, const zend_type fe_type,
+	zend_class_entry *proto_scope, const zend_type proto_type);
+
 static void zend_type_list_copy_ctor(
 	zend_type *const parent_type,
 	bool use_arena,
@@ -671,6 +676,100 @@ static inheritance_status zend_is_intersection_subtype_of_type(
 	return early_exit_status == INHERITANCE_ERROR ? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
 }
 
+/* Check if child array shape is covariant to parent array shape.
+ * For covariance (return types):
+ *   - Child must have ALL required fields from parent
+ *   - Child's field types must be covariant to parent's field types
+ *   - Child can have additional fields (makes it more specific/narrower)
+ *   - Child can make optional fields required (narrowing)
+ * Returns INHERITANCE_SUCCESS if child is covariant to parent. */
+static inheritance_status zend_array_shape_covariant_check(
+	zend_class_entry *fe_scope, const zend_type fe_type,
+	zend_class_entry *proto_scope, const zend_type proto_type)
+{
+	/* Both must be array shapes for this check */
+	if (!ZEND_TYPE_HAS_ARRAY_SHAPE(fe_type) || !ZEND_TYPE_HAS_ARRAY_SHAPE(proto_type)) {
+		/* If parent has array shape but child doesn't, child is wider (not covariant) */
+		if (ZEND_TYPE_HAS_ARRAY_SHAPE(proto_type) && !ZEND_TYPE_HAS_ARRAY_SHAPE(fe_type)) {
+			return INHERITANCE_ERROR;
+		}
+		/* If child has array shape but parent doesn't (plain array), child is narrower (covariant) */
+		if (ZEND_TYPE_HAS_ARRAY_SHAPE(fe_type) && !ZEND_TYPE_HAS_ARRAY_SHAPE(proto_type)) {
+			return INHERITANCE_SUCCESS;
+		}
+		/* Neither has array shape - fall through to normal checking */
+		return INHERITANCE_SUCCESS;
+	}
+
+	zend_array_shape *fe_shape = ZEND_ARRAY_SHAPE(fe_type);
+	zend_array_shape *proto_shape = ZEND_ARRAY_SHAPE(proto_type);
+
+	/* Build hash table of child keys for O(1) lookup */
+	HashTable fe_key_index;
+	zend_hash_init(&fe_key_index, fe_shape->num_elements, NULL, NULL, 0);
+	for (uint32_t i = 0; i < fe_shape->num_elements; i++) {
+		zend_hash_add_ptr(&fe_key_index, fe_shape->elements[i].key, (void *)(uintptr_t)i);
+	}
+
+	inheritance_status status = INHERITANCE_SUCCESS;
+
+	/* Check each parent field */
+	for (uint32_t i = 0; i < proto_shape->num_elements; i++) {
+		zend_string *key = proto_shape->elements[i].key;
+		bool parent_required = !proto_shape->elements[i].is_optional;
+
+		void *fe_idx_ptr = zend_hash_find_ptr(&fe_key_index, key);
+
+		if (fe_idx_ptr == NULL) {
+			/* Child doesn't have this field */
+			if (parent_required) {
+				/* Parent has required field that child lacks - child is wider (not covariant) */
+				status = INHERITANCE_ERROR;
+				break;
+			}
+			/* Parent's optional field missing in child is okay for covariance
+			 * (child is more specific by not having it, but this makes it non-substitutable)
+			 * Actually for strict covariance, child should have all parent fields.
+			 * Let's require child to have all parent fields for proper LSP. */
+			status = INHERITANCE_ERROR;
+			break;
+		}
+
+		uint32_t fe_idx = (uint32_t)(uintptr_t)fe_idx_ptr;
+		bool child_required = !fe_shape->elements[fe_idx].is_optional;
+
+		/* Child making parent's required field optional is invalid (widening) */
+		if (parent_required && !child_required) {
+			status = INHERITANCE_ERROR;
+			break;
+		}
+
+		/* Check type covariance for this field */
+		zend_type fe_field_type = fe_shape->elements[fe_idx].type;
+		zend_type proto_field_type = proto_shape->elements[i].type;
+
+		if (ZEND_TYPE_IS_SET(proto_field_type)) {
+			if (!ZEND_TYPE_IS_SET(fe_field_type)) {
+				/* Parent has typed field, child doesn't - widening */
+				status = INHERITANCE_ERROR;
+				break;
+			}
+
+			/* Recursively check covariance of field types */
+			inheritance_status field_status = zend_perform_covariant_type_check(
+				fe_scope, fe_field_type, proto_scope, proto_field_type);
+
+			if (field_status != INHERITANCE_SUCCESS) {
+				status = field_status;
+				break;
+			}
+		}
+	}
+
+	zend_hash_destroy(&fe_key_index);
+	return status;
+}
+
 ZEND_API inheritance_status zend_perform_covariant_type_check(
 		zend_class_entry *fe_scope, const zend_type fe_type,
 		zend_class_entry *proto_scope, const zend_type proto_type)
@@ -703,6 +802,16 @@ ZEND_API inheritance_status zend_perform_covariant_type_check(
 		if (added_types) {
 			/* Otherwise adding new types is illegal */
 			return INHERITANCE_ERROR;
+		}
+	}
+
+	/* Check array shape covariance if both types involve arrays */
+	if ((fe_type_mask & MAY_BE_ARRAY) && (proto_type_mask & MAY_BE_ARRAY)) {
+		/* Check array shape structure covariance */
+		inheritance_status shape_status = zend_array_shape_covariant_check(
+			fe_scope, fe_type, proto_scope, proto_type);
+		if (shape_status != INHERITANCE_SUCCESS) {
+			return shape_status;
 		}
 	}
 
