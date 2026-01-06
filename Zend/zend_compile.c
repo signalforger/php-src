@@ -10226,52 +10226,59 @@ static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_t
 	zend_array_shape *parent_shape = ZEND_ARRAY_SHAPE(parent_type);
 	zend_array_shape *child_shape = ZEND_ARRAY_SHAPE(child_type);
 
+	/* Build hash table of parent keys -> index for O(1) lookup instead of O(n) nested loops.
+	 * This optimizes inheritance merging from O(n*m) to O(n+m). */
+	HashTable parent_key_index;
+	zend_hash_init(&parent_key_index, parent_shape->num_elements, NULL, NULL, 0);
+	for (uint32_t i = 0; i < parent_shape->num_elements; i++) {
+		zend_hash_add_ptr(&parent_key_index, parent_shape->elements[i].key, (void *)(uintptr_t)i);
+	}
+
+	/* Build hash table of child keys -> index */
+	HashTable child_key_index;
+	zend_hash_init(&child_key_index, child_shape->num_elements, NULL, NULL, 0);
+	for (uint32_t i = 0; i < child_shape->num_elements; i++) {
+		zend_hash_add_ptr(&child_key_index, child_shape->elements[i].key, (void *)(uintptr_t)i);
+	}
+
 	/* First pass: validate overrides before allocating merged shape */
 	for (uint32_t i = 0; i < child_shape->num_elements; i++) {
-		for (uint32_t j = 0; j < parent_shape->num_elements; j++) {
-			if (zend_string_equals(child_shape->elements[i].key, parent_shape->elements[j].key)) {
-				/* Child is overriding parent element - validate */
+		void *parent_idx_ptr = zend_hash_find_ptr(&parent_key_index, child_shape->elements[i].key);
+		if (parent_idx_ptr != NULL) {
+			uint32_t j = (uint32_t)(uintptr_t)parent_idx_ptr;
+			/* Child is overriding parent element - validate */
 
-				/* Rule 1: Cannot make required property optional */
-				if (!parent_shape->elements[j].is_optional && child_shape->elements[i].is_optional) {
-					zend_error_noreturn(E_COMPILE_ERROR,
-						"Shape %s cannot make required property '%s' optional (inherited as required from parent)",
-						ZSTR_VAL(shape_name), ZSTR_VAL(child_shape->elements[i].key));
-				}
+			/* Rule 1: Cannot make required property optional */
+			if (!parent_shape->elements[j].is_optional && child_shape->elements[i].is_optional) {
+				zend_hash_destroy(&parent_key_index);
+				zend_hash_destroy(&child_key_index);
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Shape %s cannot make required property '%s' optional (inherited as required from parent)",
+					ZSTR_VAL(shape_name), ZSTR_VAL(child_shape->elements[i].key));
+			}
 
-				/* Rule 2: Child type must be covariant (subset of parent type) */
-				if (!zend_shape_type_is_covariant(child_shape->elements[i].type, parent_shape->elements[j].type)) {
-					zend_string *parent_type_str = zend_type_to_string(parent_shape->elements[j].type);
-					zend_string *child_type_str = zend_type_to_string(child_shape->elements[i].type);
-					zend_error_noreturn(E_COMPILE_ERROR,
-						"Shape %s property '%s' type %s is not compatible with parent type %s",
-						ZSTR_VAL(shape_name), ZSTR_VAL(child_shape->elements[i].key),
-						ZSTR_VAL(child_type_str), ZSTR_VAL(parent_type_str));
-				}
-
-				break;
+			/* Rule 2: Child type must be covariant (subset of parent type) */
+			if (!zend_shape_type_is_covariant(child_shape->elements[i].type, parent_shape->elements[j].type)) {
+				zend_string *parent_type_str = zend_type_to_string(parent_shape->elements[j].type);
+				zend_string *child_type_str = zend_type_to_string(child_shape->elements[i].type);
+				zend_hash_destroy(&parent_key_index);
+				zend_hash_destroy(&child_key_index);
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Shape %s property '%s' type %s is not compatible with parent type %s",
+					ZSTR_VAL(shape_name), ZSTR_VAL(child_shape->elements[i].key),
+					ZSTR_VAL(child_type_str), ZSTR_VAL(parent_type_str));
 			}
 		}
 	}
 
-	/* Calculate total elements (parent + child, with child overriding parent) */
-	uint32_t total_elements = parent_shape->num_elements;
+	/* Calculate total elements: parent elements + new child elements (not overriding) */
 	uint32_t child_new_elements = 0;
-
-	/* Count new elements in child that don't override parent */
 	for (uint32_t i = 0; i < child_shape->num_elements; i++) {
-		bool found = false;
-		for (uint32_t j = 0; j < parent_shape->num_elements; j++) {
-			if (zend_string_equals(child_shape->elements[i].key, parent_shape->elements[j].key)) {
-				found = true;
-				break;
-			}
-		}
-		if (!found) {
+		if (!zend_hash_exists(&parent_key_index, child_shape->elements[i].key)) {
 			child_new_elements++;
 		}
 	}
-	total_elements += child_new_elements;
+	uint32_t total_elements = parent_shape->num_elements + child_new_elements;
 
 	/* Allocate merged shape */
 	size_t shape_size = sizeof(zend_array_shape) + total_elements * sizeof(zend_array_shape_element);
@@ -10284,22 +10291,17 @@ static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_t
 
 	/* First, copy parent elements (can be overridden by child) */
 	for (uint32_t i = 0; i < parent_shape->num_elements; i++) {
-		/* Check if child overrides this element */
-		bool overridden = false;
-		for (uint32_t j = 0; j < child_shape->num_elements; j++) {
-			if (zend_string_equals(parent_shape->elements[i].key, child_shape->elements[j].key)) {
-				/* Child overrides - persist child's version */
-				merged_shape->elements[merged_idx].key = zend_persist_shape_key(child_shape->elements[j].key);
-				merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(child_shape->elements[j].type);
-				merged_shape->elements[merged_idx].is_optional = child_shape->elements[j].is_optional;
-				if (!child_shape->elements[j].is_optional) {
-					num_required++;
-				}
-				overridden = true;
-				break;
+		void *child_idx_ptr = zend_hash_find_ptr(&child_key_index, parent_shape->elements[i].key);
+		if (child_idx_ptr != NULL) {
+			/* Child overrides - persist child's version */
+			uint32_t j = (uint32_t)(uintptr_t)child_idx_ptr;
+			merged_shape->elements[merged_idx].key = zend_persist_shape_key(child_shape->elements[j].key);
+			merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(child_shape->elements[j].type);
+			merged_shape->elements[merged_idx].is_optional = child_shape->elements[j].is_optional;
+			if (!child_shape->elements[j].is_optional) {
+				num_required++;
 			}
-		}
-		if (!overridden) {
+		} else {
 			/* Persist parent's version */
 			merged_shape->elements[merged_idx].key = zend_persist_shape_key(parent_shape->elements[i].key);
 			merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(parent_shape->elements[i].type);
@@ -10313,14 +10315,7 @@ static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_t
 
 	/* Then add child elements that weren't overriding parent */
 	for (uint32_t i = 0; i < child_shape->num_elements; i++) {
-		bool found = false;
-		for (uint32_t j = 0; j < parent_shape->num_elements; j++) {
-			if (zend_string_equals(child_shape->elements[i].key, parent_shape->elements[j].key)) {
-				found = true;
-				break;
-			}
-		}
-		if (!found) {
+		if (!zend_hash_exists(&parent_key_index, child_shape->elements[i].key)) {
 			merged_shape->elements[merged_idx].key = zend_persist_shape_key(child_shape->elements[i].key);
 			merged_shape->elements[merged_idx].type = zend_shape_type_deep_copy(child_shape->elements[i].type);
 			merged_shape->elements[merged_idx].is_optional = child_shape->elements[i].is_optional;
@@ -10330,6 +10325,10 @@ static zend_type zend_merge_shape_types(zend_type parent_type, zend_type child_t
 			merged_idx++;
 		}
 	}
+
+	/* Clean up temporary hash tables */
+	zend_hash_destroy(&parent_key_index);
+	zend_hash_destroy(&child_key_index);
 
 	merged_shape->num_required = num_required;
 

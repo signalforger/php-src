@@ -281,6 +281,8 @@ ZEND_INI_BEGIN()
 	/* Subtracted from the max allowed stack size, as a buffer, when checking for overflow. 0: auto detect. */
 	STD_ZEND_INI_ENTRY("zend.reserved_stack_size",	"0",	ZEND_INI_SYSTEM,	OnUpdateReservedStackSize,	reserved_stack_size,		zend_executor_globals,	executor_globals)
 #endif
+	/* Maximum recursion depth for shape/typed array validation. Default 64. */
+	STD_ZEND_INI_ENTRY("zend.shape_max_recursion_depth",	"64",	ZEND_INI_ALL,	OnUpdateLongGEZero,	shape_max_recursion_depth,	zend_executor_globals,	executor_globals)
 
 ZEND_INI_END()
 

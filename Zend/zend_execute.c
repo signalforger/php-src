@@ -2024,9 +2024,10 @@ static bool zend_verify_nested_array_type(zval *val, const zend_type *array_type
 		return false;
 	}
 
-	/* Check recursion depth limit */
-	if (UNEXPECTED(zend_typed_array_recursion_depth >= ZEND_TYPED_ARRAY_MAX_DEPTH)) {
-		zend_error(E_WARNING, "Maximum nested typed array depth of %d exceeded", ZEND_TYPED_ARRAY_MAX_DEPTH);
+	/* Check recursion depth limit. Uses same INI as shape validation. */
+	zend_long max_depth = EG(shape_max_recursion_depth);
+	if (max_depth > 0 && UNEXPECTED(zend_typed_array_recursion_depth >= max_depth)) {
+		zend_error(E_WARNING, "Maximum nested typed array depth of " ZEND_LONG_FMT " exceeded", max_depth);
 		return false;
 	}
 
@@ -2654,11 +2655,13 @@ static bool zend_check_shape_type(const zend_type *type, zval *arg, bool is_retu
 	}
 
 	/* Check for excessive recursion depth (circular shape references).
-	 * This check happens BEFORE incrementing to avoid counter imbalance on error. */
-	if (UNEXPECTED(zend_shape_recursion_depth >= ZEND_SHAPE_MAX_RECURSION_DEPTH)) {
+	 * This check happens BEFORE incrementing to avoid counter imbalance on error.
+	 * The limit is configurable via zend.shape_max_recursion_depth INI directive. */
+	zend_long max_depth = EG(shape_max_recursion_depth);
+	if (max_depth > 0 && UNEXPECTED(zend_shape_recursion_depth >= max_depth)) {
 		zend_error_noreturn(E_ERROR,
-			"Maximum shape nesting level of %d exceeded, possible circular reference",
-			ZEND_SHAPE_MAX_RECURSION_DEPTH);
+			"Maximum shape nesting level of " ZEND_LONG_FMT " exceeded, possible circular reference",
+			max_depth);
 	}
 
 	zend_string *name = ZEND_TYPE_NAME(*type);

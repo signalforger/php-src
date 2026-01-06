@@ -194,6 +194,8 @@ struct _zend_executor_globals {
 	HashTable *zend_constants;	/* constants table */
 	HashTable *shape_table;		/* shape type aliases */
 
+	zend_long shape_max_recursion_depth;  /* Configurable max recursion for shape validation */
+
 	zval          *vm_stack_top;
 	zval          *vm_stack_end;
 	zend_vm_stack  vm_stack;
